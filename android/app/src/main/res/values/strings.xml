@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">الأثيل</string>
+    <string name="title_activity_main">الأثيل</string>
+    <string name="package_name">com.alatheel.stable</string>
+    <string name="custom_url_scheme">com.alatheel.stable</string>
+</resources>

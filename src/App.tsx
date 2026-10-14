@@ -1,0 +1,1921 @@
+import { useEffect, useRef, useState, ReactNode } from "react";
+import {
+  LayoutDashboard,
+  Package,
+  Wallet,
+  Users,
+  Plus,
+  ArrowUpLeft,
+  Bell,
+  Search,
+  X,
+  ChevronLeft,
+  LogOut,
+  ClipboardList,
+  SlidersHorizontal,
+  Download,
+  Check,
+  Archive,
+  History,
+  ShieldCheck,
+} from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { App as NativeApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
+import {
+  connect,
+  demo,
+  login,
+  logout,
+  execute,
+  member,
+  resetDemo,
+  errorText,
+  Actor,
+  State,
+  Row,
+  staff,
+  bill,
+  nextMonth,
+} from "./service";
+import { emptyState } from "../functions/src/domain";
+import { costs, horseCost } from "./metrics";
+import { exportExcel, exportPdf } from "./export";
+type Field = {
+  name: string;
+  label: string;
+  type?: string;
+  required?: boolean;
+  options?: [string, string][];
+  min?: number;
+  max?: number;
+};
+type Form = {
+  title: string;
+  fields: Field[];
+  values: Record<string, any>;
+  submit: (d: Record<string, any>) => Promise<void>;
+  feeding?: boolean;
+  horses?: boolean;
+  note?: string;
+};
+const roles: Record<string, string> = {
+  admin: "مدير الإسطبل",
+  employee: "موظف التشغيل",
+  owner: "مالك خيل",
+  viewer: "عضو جديد",
+};
+const status: Record<string, string> = {
+  boarding: "إيواء",
+  boarding_breeding: "إيواء وتشبيه",
+  private: "ملك خاص",
+  archived: "مؤرشف",
+  pending: "قيد المراجعة",
+  reviewing: "تحت الدراسة",
+  awaiting_owner_approval: "بانتظار موافقتك",
+  approved: "تم التسجيل",
+  rejected: "مرفوض",
+};
+const frequencies: [string, string][] = [
+  ["once", "مرة واحدة"],
+  ["daily", "يومي"],
+  ["weekly", "أسبوعي"],
+  ["monthly", "شهري"],
+];
+const money = (n: unknown) =>
+  Number(n || 0).toLocaleString("ar-SA", { maximumFractionDigits: 2 });
+const today = () => new Date().toISOString().slice(0, 10);
+const HorseIcon = ({ size = 22 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+  >
+    <path d="m5 20 2-7-3-2 6-7 3 2 4-3v5c4 4 4 8 2 12M7 13h5l-2 7M10 8h.1" />
+  </svg>
+);
+function Button({
+  children,
+  onClick,
+  kind = "",
+  disabled = false,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  kind?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button disabled={disabled} className={`button ${kind}`} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+function Empty({ text = "لا توجد سجلات بعد" }: { text?: string }) {
+  return (
+    <div className="empty">
+      <ClipboardList />
+      <p>{text}</p>
+    </div>
+  );
+}
+export default function App() {
+  const [s, setState] = useState<State>(emptyState()),
+    [a, setActor] = useState<Actor | null>(null),
+    [tab, setTab] = useState("dashboard"),
+    [form, setForm] = useState<Form | null>(null),
+    [detail, setDetail] = useState<{
+      title: string;
+      content: ReactNode;
+    } | null>(null),
+    [toast, setToast] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [search, setSearch] = useState(""),
+    [archived, setArchived] = useState(false),
+    [month, setMonth] = useState(today().slice(0, 7)),
+    [incomeTab, setIncomeTab] = useState("pending"),
+    [loginOpen, setLoginOpen] = useState(false),
+    [online, setOnline] = useState(navigator.onLine);
+  const mainRef = useRef<HTMLElement>(null),
+    lock = useRef(false),
+    prevUid = useRef<string | null>(null);
+  useEffect(
+    () =>
+      connect((state, actor, e) => {
+        setState(state);
+        setActor(actor);
+        if (e) setError(e);
+        if (actor?.uid !== prevUid.current) {
+          setTab("dashboard");
+          setForm(null);
+          setDetail(null);
+          setSearch("");
+          setLoginOpen(false);
+          prevUid.current = actor?.uid || null;
+        }
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(""), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  useEffect(() => {
+    const fn = () => setOnline(navigator.onLine);
+    window.addEventListener("online", fn);
+    window.addEventListener("offline", fn);
+    return () => {
+      window.removeEventListener("online", fn);
+      window.removeEventListener("offline", fn);
+    };
+  }, []);
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const handle = NativeApp.addListener("backButton", () => {
+      if (form) setForm(null);
+      else if (detail) setDetail(null);
+      else if (tab !== "dashboard") setTab("dashboard");
+      else void NativeApp.minimizeApp();
+    });
+    return () => {
+      void handle.then((h) => h.remove());
+    };
+  }, [form, detail, tab]);
+  const isStaff = !!a && staff(a),
+    isAdmin = a?.role === "admin",
+    name = s.settings[0]?.stableName || "إسطبل الأثيل",
+    active = s.horses.filter((h) => h.status !== "archived"),
+    stats = costs(s, month),
+    filtered = (rows: Row[], fields: string[]) =>
+      rows.filter((r) =>
+        fields.some((k) => String(r[k] || "").includes(search)),
+      );
+  const go = (page: string) => {
+    setTab(page);
+    setSearch("");
+    mainRef.current?.scrollTo({ top: 0 });
+  };
+  const run = async (fn: () => Promise<void>, close = true) => {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+      if (close) {
+        setForm(null);
+        setDetail(null);
+      }
+      setToast("تم الحفظ بنجاح");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  };
+  const perform = (action: string, id?: string, data?: Record<string, any>) =>
+    run(() => execute({ action, id, data }));
+  const confirm = (
+    title: string,
+    description: string,
+    fn: () => Promise<void>,
+  ) =>
+    setDetail({
+      title,
+      content: (
+        <>
+          <p>{description}</p>
+          <Button kind="gold" onClick={() => void run(fn)}>
+            تأكيد العملية
+          </Button>
+        </>
+      ),
+    });
+  const newRequest = () =>
+    setForm({
+      title: "طلب تسجيل خيل",
+      fields: [
+        { name: "horseName", label: "اسم الخيل", required: true },
+        { name: "age", label: "العمر", required: true },
+        {
+          name: "requestType",
+          label: "نوع الخدمة",
+          options: [
+            ["boarding", "إيواء"],
+            ["boarding_breeding", "إيواء وتشبيه"],
+          ],
+        },
+        { name: "registrationNum", label: "رقم التسجيل" },
+        { name: "notes", label: "ملاحظات", type: "textarea" },
+      ],
+      values: { requestType: "boarding" },
+      submit: (d) => execute({ action: "request.create", data: d }),
+      note: "تراجع الإدارة الطلب وترسل رسوم الإيواء. بعد موافقتك يُسجل الخيل ويظهر في حسابك.",
+    });
+  const horseForm = (h?: Row) =>
+    setForm({
+      title: h ? "تعديل بيانات الخيل" : "إضافة خيل",
+      fields: [
+        { name: "name", label: "اسم الخيل", required: true },
+        {
+          name: "ownerId",
+          label: "المالك",
+          required: true,
+          options: s.users
+            .filter((u) => !u.disabled && !u.deleted)
+            .map((u) => [u.id, u.displayName]),
+        },
+        {
+          name: "status",
+          label: "الحالة",
+          options: [
+            ["boarding", "إيواء"],
+            ["boarding_breeding", "إيواء وتشبيه"],
+            ["private", "ملك خاص"],
+          ],
+        },
+        {
+          name: "entryDate",
+          label: "تاريخ الدخول",
+          type: "date",
+          required: true,
+        },
+        { name: "dueDate", label: "موعد الاستحقاق", type: "date" },
+        {
+          name: "boardingFee",
+          label: "رسوم الإيواء (ر.س)",
+          type: "number",
+          min: 0,
+          required: true,
+        },
+        { name: "registrationNum", label: "رقم التسجيل" },
+        { name: "notes", label: "ملاحظات", type: "textarea" },
+      ],
+      values: h || {
+        ownerId: s.users.find((u) => u.role === "owner")?.id || s.users[0]?.id,
+        status: "boarding",
+        entryDate: today(),
+        dueDate: nextMonth(today()),
+        boardingFee: 0,
+        feeding: [],
+      },
+      feeding: true,
+      submit: (d) => execute({ action: "horse.save", id: h?.id, data: d }),
+    });
+  const mealForm = (m?: Row) =>
+    setForm({
+      title: m ? "تعديل صنف" : "صنف جديد",
+      fields: [
+        { name: "name", label: "اسم الصنف", required: true },
+        { name: "unit", label: "وحدة القياس", required: true },
+        {
+          name: "pricePerUnit",
+          label: "سعر الوحدة",
+          type: "number",
+          min: 0,
+          required: true,
+        },
+        {
+          name: "minThreshold",
+          label: "حد التنبيه",
+          type: "number",
+          min: 0,
+          required: true,
+        },
+        ...(!m
+          ? [
+              {
+                name: "currentStock",
+                label: "الرصيد الافتتاحي",
+                type: "number",
+                min: 0,
+                required: true,
+              },
+            ]
+          : []),
+      ],
+      values: m || {
+        unit: "كجم",
+        pricePerUnit: 0,
+        minThreshold: 10,
+        currentStock: 0,
+      },
+      submit: (d) => execute({ action: "meal.save", id: m?.id, data: d }),
+      note: m
+        ? "لتغيير الرصيد استخدم إضافة أو صرف، للحفاظ على سجل الحركات."
+        : undefined,
+    });
+  const move = (m: Row, type: string) =>
+    setForm({
+      title: `${type === "add" ? "إضافة إلى" : "صرف من"} ${m.name}`,
+      fields: [
+        {
+          name: "amount",
+          label: `الكمية (${m.unit})`,
+          type: "number",
+          min: 0.01,
+          ...(type === "remove" ? { max: m.currentStock } : {}),
+          required: true,
+        },
+        { name: "reason", label: "سبب الحركة", type: "textarea" },
+      ],
+      values: { amount: 1, type },
+      note: `الرصيد الحالي: ${money(m.currentStock)} ${m.unit}`,
+      submit: (d) => execute({ action: "stock.move", id: m.id, data: d }),
+    });
+  const expenseForm = (e?: Row) =>
+    setForm({
+      title: e ? "تعديل مصروف" : "مصروف جديد",
+      fields: [
+        { name: "name", label: "اسم المصروف", required: true },
+        {
+          name: "cost",
+          label: "التكلفة (ر.س)",
+          type: "number",
+          min: 0,
+          required: true,
+        },
+        { name: "frequency", label: "التكرار", options: frequencies },
+      ],
+      values: e || { cost: 0, frequency: "once", horseIds: [] },
+      horses: true,
+      note: "عدم تحديد خيل يعني مصروفًا عامًا. المصروف لمرة واحدة يوزع بالتساوي على الخيل المحددة ويضاف للتحصيل مرة واحدة.",
+      submit: (d) => execute({ action: "expense.save", id: e?.id, data: d }),
+    });
+  const memberForm = (u?: Row) =>
+    setForm({
+      title: u ? "تعديل عضو وصلاحيته" : "تسجيل عضو جديد",
+      fields: [
+        { name: "displayName", label: "الاسم الكامل", required: true },
+        {
+          name: "phoneNumber",
+          label: "رقم الجوال",
+          type: "tel",
+          required: true,
+        },
+        ...(!u
+          ? [
+              {
+                name: "email",
+                label: "البريد المستخدم في Google",
+                type: "email",
+                required: true,
+              },
+            ]
+          : []),
+        {
+          name: "role",
+          label: "الصلاحية",
+          options: (u
+            ? Object.entries(roles)
+            : [
+                ["owner", "مالك خيل"],
+                ["employee", "موظف التشغيل"],
+              ]) as [string, string][],
+        },
+      ],
+      values: u || { role: "owner" },
+      note: "يدخل العضو بحساب Google المطابق للبريد. ترقية عضو إلى مدير متاحة من تعديل العضو.",
+      submit: (d) => member(u ? "update" : "create", u?.id, d),
+    });
+  const horseDetail = (h: Row) => {
+    const c = horseCost(s, h, month);
+    const url = import.meta.env.VITE_PUBLIC_APP_URL;
+    setDetail({
+      title: h.name,
+      content: (
+        <>
+          <div className="profile-icon">
+            <HorseIcon size={55} />
+          </div>
+          <dl>
+            <dt>المالك</dt>
+            <dd>{h.ownerName}</dd>
+            <dt>الحالة</dt>
+            <dd>{status[h.status] || h.status}</dd>
+            <dt>التسجيل</dt>
+            <dd>{h.registrationNum || "—"}</dd>
+            <dt>الدخول</dt>
+            <dd>{h.entryDate}</dd>
+            <dt>الاستحقاق</dt>
+            <dd>{h.dueDate || "—"}</dd>
+            <dt>رسوم الإيواء</dt>
+            <dd>{money(h.boardingFee)} ر.س</dd>
+          </dl>
+          {isStaff && (
+            <div className="notice">
+              تكلفة تقديرية للشهر: {money(c.total)} ر.س
+            </div>
+          )}
+          <p>{h.notes || "لا توجد ملاحظات"}</p>
+          <h3>التغذية اليومية</h3>
+          {h.feeding?.length ? (
+            h.feeding.map((f: any, i: number) => (
+              <p key={i}>
+                {s.mealTypes.find((m) => m.id === f.mealTypeId)?.name ||
+                  "صنف تغذية"}{" "}
+                · {f.quantity}
+              </p>
+            ))
+          ) : (
+            <p className="muted">لم يحدد برنامج تغذية</p>
+          )}
+          <div className="qr">
+            <QRCodeSVG
+              value={
+                url
+                  ? `${url.replace(/\/$/, "")}/?horse=${encodeURIComponent(h.id)}`
+                  : `Alatheel:horse:${h.id}`
+              }
+              size={150}
+            />
+            <small>
+              {url ? "رابط ملف الخيل؛ يتطلب تسجيل الدخول" : "معرف الخيل"}
+            </small>
+          </div>
+          {isStaff && (
+            <div className="actions">
+              <Button
+                onClick={() => {
+                  setDetail(null);
+                  horseForm(h);
+                }}
+              >
+                تعديل
+              </Button>
+              {h.status === "archived" ? (
+                <Button onClick={() => perform("horse.restore", h.id)}>
+                  استعادة الخيل
+                </Button>
+              ) : (
+                <Button
+                  kind="danger"
+                  onClick={() => {
+                    setDetail(null);
+                    setForm({
+                      title: "إخراج الخيل",
+                      fields: [
+                        {
+                          name: "exitDate",
+                          label: "تاريخ الخروج",
+                          type: "date",
+                          required: true,
+                        },
+                        {
+                          name: "exitReason",
+                          label: "السبب",
+                          options: [
+                            ["customer_request", "رغبة العميل"],
+                            ["death", "وفاة"],
+                          ],
+                        },
+                      ],
+                      values: {
+                        exitDate: today(),
+                        exitReason: "customer_request",
+                      },
+                      submit: (d) =>
+                        execute({
+                          action: "horse.checkout",
+                          id: h.id,
+                          data: d,
+                        }),
+                    });
+                  }}
+                >
+                  إخراج الخيل
+                </Button>
+              )}
+            </div>
+          )}
+        </>
+      ),
+    });
+  };
+  useEffect(() => {
+    if (!a || !s.horses.length) return;
+    const id = new URLSearchParams(location.search).get("horse");
+    if (id) {
+      const h = s.horses.find((h) => h.id === id);
+      if (h) {
+        horseDetail(h);
+        history.replaceState({}, "", location.pathname);
+      }
+    }
+  }, [a?.uid, s.horses.length]);
+  const collect = (h: Row) => {
+    const b = bill(s, h);
+    setDetail({
+      title: "تأكيد التحصيل",
+      content: (
+        <>
+          <p className="eyebrow">
+            {h.name} · {h.ownerName}
+          </p>
+          <div className="big-number">
+            {money(b.amount)} <small>ر.س</small>
+          </div>
+          <dl>
+            <dt>رسوم الإيواء</dt>
+            <dd>{money(h.boardingFee)}</dd>
+            {b.extras.map((e) => (
+              <div className="dl-row" key={e.id}>
+                <dt>{e.name}</dt>
+                <dd>{money(e.allocations[h.id])}</dd>
+              </div>
+            ))}
+            <dt>الاستحقاق الحالي</dt>
+            <dd>{h.dueDate}</dd>
+            <dt>الاستحقاق التالي</dt>
+            <dd>{h.dueDate ? nextMonth(h.dueDate) : "غير محدد"}</dd>
+          </dl>
+          <p className="muted">
+            يسجل السداد ويحدث الاستحقاق شهرًا واحدًا من موعده الحالي.
+          </p>
+          <Button
+            kind="gold"
+            onClick={() =>
+              perform("income.collect", h.id, {
+                expectedDueDate: h.dueDate,
+                expectedAmount: b.amount,
+              })
+            }
+          >
+            تأكيد استلام المبلغ
+          </Button>
+        </>
+      ),
+    });
+  };
+  const nav = isStaff
+    ? [
+        ["dashboard", "الرئيسية", LayoutDashboard],
+        ["horses", "الخيل", HorseIcon],
+        ["inventory", "المخزون", Package],
+        ["income", "التحصيل", Wallet],
+        ["more", "المزيد", SlidersHorizontal],
+      ]
+    : a?.role === "owner"
+      ? [
+          ["dashboard", "الرئيسية", LayoutDashboard],
+          ["horses", "خيلي", HorseIcon],
+          ["requests", "طلباتي", ClipboardList],
+          ["income", "التحصيل", Wallet],
+          ["more", "حسابي", Users],
+        ]
+      : [
+          ["dashboard", "الرئيسية", LayoutDashboard],
+          ["requests", "طلباتي", ClipboardList],
+          ["income", "التحصيل", Wallet],
+          ["more", "حسابي", Users],
+        ];
+  const titles: Record<string, string> = {
+    dashboard: "كل شيء، تحت نظرك.",
+    horses: isStaff ? "الخيل." : "خيلي.",
+    inventory: "المخزون.",
+    income: "التحصيل.",
+    requests: "طلبات التسجيل.",
+    expenses: "المصروفات.",
+    members: "الأعضاء.",
+    more: "إدارة حسابك.",
+    activity: "سجل العمليات.",
+  };
+  const pending = s.registrationRequests.filter((r) =>
+    ["pending", "reviewing"].includes(r.status),
+  );
+  const heading = (subtitle: string, button?: ReactNode) => (
+    <div className="section-heading">
+      <div>
+        <p className="eyebrow">{subtitle}</p>
+        <h1>{titles[tab]}</h1>
+      </div>
+      {button}
+    </div>
+  );
+  const searchBox = (
+    <label className="search">
+      <Search size={19} />
+      <input
+        aria-label="البحث"
+        placeholder="ابحث بالاسم أو المالك…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+    </label>
+  );
+  return (
+    <div className="app" dir="rtl">
+      {demo && (
+        <div className="demo-banner">
+          نسخة تجربة محلية · البيانات محفوظة على هذا الجهاز{" "}
+          <button
+            onClick={() => {
+              logout();
+              setLoginOpen(true);
+            }}
+          >
+            تبديل الحساب
+          </button>
+        </div>
+      )}
+      {!online && (
+        <div className="offline" role="status">
+          لا يوجد اتصال.{" "}
+          {demo
+            ? "التجربة المحلية متاحة."
+            : "تتطلب العمليات اتصالًا؛ أعد المحاولة بعد عودته."}
+        </div>
+      )}
+      <header>
+        <div className="brand">
+          <img src="/logo.jpeg" alt="شعار إسطبل الأثيل" />
+          <div>
+            <b>{name}</b>
+            <small>AL ATHEEL STUD</small>
+          </div>
+        </div>
+        {a ? (
+          <button
+            className="icon-button"
+            aria-label="التنبيهات"
+            onClick={() => go("activity")}
+          >
+            <Bell size={21} />
+            {pending.length > 0 && isStaff && <i />}
+          </button>
+        ) : (
+          <button className="header-login" onClick={() => setLoginOpen(true)}>
+            دخول الأعضاء <ArrowUpLeft size={16} />
+          </button>
+        )}
+      </header>
+      <main ref={mainRef}>
+        {!a ? (
+          <>
+            <div className="hero">
+              <img src="/horses.jpg" alt="صورة توضيحية لخيل عربية" />
+              <div className="hero-shade" />
+              <span>صورة توضيحية</span>
+              <div className="hero-copy">
+                <p>الأصالة تُرعى هنا</p>
+                <h1>
+                  خيلك.
+                  <br />
+                  في موطنها.
+                </h1>
+              </div>
+            </div>
+            <section className="welcome">
+              <p className="eyebrow">إسطبل الأثيل</p>
+              <h2>رعاية تليق بالأصيل.</h2>
+              <p className="muted">
+                إيواء ورعاية يومية ومتابعة لخيلك، وتجربة واحدة تجمع طلباتك
+                وسجلاتك وتفاصيل الإيواء.
+              </p>
+              <div className="services">
+                {[
+                  "إيواء الخيل",
+                  "تغذية ورعاية",
+                  "إيواء وتشبيه",
+                  "متابعة المالك",
+                ].map((x, i) => (
+                  <div key={x}>
+                    <span>0{i + 1}</span>
+                    <b>{x}</b>
+                  </div>
+                ))}
+              </div>
+              <Button kind="gold" onClick={() => setLoginOpen(true)}>
+                التسجيل ودخول الأعضاء <ArrowUpLeft size={20} />
+              </Button>
+              <Button kind="outline" onClick={() => setLoginOpen(true)}>
+                طلب تسجيل خيل
+              </Button>
+              <p className="muted small">
+                بعد التسجيل تظهر لوحة معلومات حسابك، ومنها تقدم طلب الخيل وتتابع
+                اعتماد الإدارة.
+              </p>
+            </section>
+          </>
+        ) : (
+          <div className="content">
+            {tab === "dashboard" && (
+              <>
+                {heading(`مرحبًا، ${a.displayName}`)}
+                <label className="period">
+                  الفترة{" "}
+                  <input
+                    type="month"
+                    aria-label="شهر التقرير"
+                    value={month}
+                    onChange={(e) =>
+                      setMonth(e.target.value || today().slice(0, 7))
+                    }
+                  />
+                </label>
+                <div className="dashboard-grid">
+                  <button className="stat dark" onClick={() => go("horses")}>
+                    <HorseIcon />
+                    <span>{isStaff ? "الخيل في الإسطبل" : "خيلك المسجلة"}</span>
+                    <strong>{money(active.length)}</strong>
+                    <small>
+                      عرض التفاصيل <ArrowUpLeft size={16} />
+                    </small>
+                  </button>
+                  <button className="stat gold" onClick={() => go("income")}>
+                    <Wallet />
+                    <span>المبالغ المحصلة</span>
+                    <strong>{money(stats.collected)}</strong>
+                    <small>ريال سعودي · خلال الفترة</small>
+                  </button>
+                  <button className="stat" onClick={() => go("requests")}>
+                    <ClipboardList />
+                    <span>{isStaff ? "طلبات تحتاج مراجعة" : "طلباتك"}</span>
+                    <strong>
+                      {isStaff ? pending.length : s.registrationRequests.length}
+                    </strong>
+                    <small>
+                      متابعة التسجيل <ArrowUpLeft size={16} />
+                    </small>
+                  </button>
+                  <button
+                    className="stat"
+                    onClick={() => go(isStaff ? "members" : "income")}
+                  >
+                    <Users />
+                    <span>{isStaff ? "الملاك" : "رسوم الإيواء الشهرية"}</span>
+                    <strong>
+                      {isStaff
+                        ? new Set(active.map((h) => h.ownerId)).size
+                        : money(stats.expected)}
+                    </strong>
+                    <small>
+                      {isStaff ? "أصحاب الخيل النشطة" : "ريال سعودي"}
+                    </small>
+                  </button>
+                </div>
+                <div className="section-heading compact">
+                  <h2>إجراء سريع</h2>
+                  <span className="muted">من هنا تبدأ</span>
+                </div>
+                <div className="quick-actions">
+                  {isStaff ? (
+                    <>
+                      <Button onClick={() => horseForm()}>
+                        <Plus size={18} />
+                        إضافة خيل
+                      </Button>
+                      <Button onClick={() => go("inventory")}>
+                        <Package size={18} />
+                        حركة مخزون
+                      </Button>
+                      <Button onClick={() => go("income")}>
+                        <Wallet size={18} />
+                        تحصيل
+                      </Button>
+                    </>
+                  ) : (
+                    <Button kind="gold" onClick={newRequest}>
+                      <Plus size={18} />
+                      طلب تسجيل خيل
+                    </Button>
+                  )}
+                </div>
+                {isStaff && (
+                  <>
+                    <section className="card">
+                      <div className="section-heading compact">
+                        <h2>تكلفة التشغيل</h2>
+                        <span className="pill">تقديرية</span>
+                      </div>
+                      <div className="big-number">
+                        {money(stats.total)} <small>ر.س</small>
+                      </div>
+                      <div className="cost-bar">
+                        <i
+                          style={{
+                            width: `${stats.total ? (stats.feeding / stats.total) * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="spread">
+                        <span>التغذية {money(stats.feeding)}</span>
+                        <span>المصروفات {money(stats.other)}</span>
+                      </div>
+                      <p className="muted small">
+                        التغذية حسب البرنامج الحالي وأيام الشهر؛ لا تمثل سجل
+                        استهلاك تاريخيًا.
+                      </p>
+                      <div className="ledger">
+                        <span>الإيواء الشهري المتوقع</span>
+                        <b>{money(stats.expected)} ر.س</b>
+                        <span>المحصل − التكلفة التقديرية</span>
+                        <b>{money(stats.balance)} ر.س</b>
+                        <span>خيل متأخرة عن الاستحقاق</span>
+                        <b>
+                          {
+                            active.filter(
+                              (h) => h.dueDate && h.dueDate < today(),
+                            ).length
+                          }
+                        </b>
+                      </div>
+                    </section>
+                    <section className="card">
+                      <h2>تنبيهات المخزون</h2>
+                      {s.mealTypes.filter(
+                        (m) => m.currentStock <= m.minThreshold,
+                      ).length ? (
+                        s.mealTypes
+                          .filter((m) => m.currentStock <= m.minThreshold)
+                          .map((m) => (
+                            <button
+                              key={m.id}
+                              className="list-link"
+                              onClick={() => go("inventory")}
+                            >
+                              <span>
+                                {m.name}
+                                <small>بلغ حد التنبيه</small>
+                              </span>
+                              <b className="warning">
+                                {money(m.currentStock)} {m.unit}
+                              </b>
+                              <ChevronLeft size={18} />
+                            </button>
+                          ))
+                      ) : (
+                        <p className="muted">الأرصدة أعلى من حدود التنبيه.</p>
+                      )}
+                    </section>
+                  </>
+                )}
+                <section className="card">
+                  <h2>التحصيل خلال ٦ أشهر</h2>
+                  <div className="chart">
+                    {Array.from({ length: 6 }, (_, i) => {
+                      const d = new Date();
+                      d.setMonth(d.getMonth() - (5 - i));
+                      const m = d.toISOString().slice(0, 7),
+                        v = s.income
+                          .filter(
+                            (x) => String(x.collectedAt).slice(0, 7) === m,
+                          )
+                          .reduce((n, x) => n + x.amount, 0),
+                        max =
+                          Math.max(1, ...s.income.map((x) => x.amount)) *
+                          Math.max(1, s.income.length);
+                      return (
+                        <div key={m}>
+                          <small>{money(v)}</small>
+                          <i
+                            style={{
+                              height: Math.max(3, (v / max) * 100) + "px",
+                            }}
+                          />
+                          <span>{m.slice(5)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="muted small">
+                    من سجلات التحصيل الفعلية المتاحة.
+                  </p>
+                </section>
+                <div className="actions">
+                  <Button
+                    kind="outline"
+                    onClick={() => void run(() => exportExcel(s, month), false)}
+                  >
+                    <Download size={17} />
+                    Excel
+                  </Button>
+                  <Button
+                    kind="outline"
+                    onClick={() => void run(() => exportPdf(s, month), false)}
+                  >
+                    <Download size={17} />
+                    PDF
+                  </Button>
+                </div>
+              </>
+            )}
+            {tab === "horses" && (
+              <>
+                {heading(
+                  `${active.length} خيل نشطة`,
+                  isStaff ? (
+                    <button
+                      className="round-add"
+                      aria-label="إضافة خيل"
+                      onClick={() => horseForm()}
+                    >
+                      <Plus />
+                    </button>
+                  ) : undefined,
+                )}
+                {searchBox}
+                <div className="tabs">
+                  <button
+                    className={!archived ? "selected" : ""}
+                    onClick={() => setArchived(false)}
+                  >
+                    النشطة
+                  </button>
+                  <button
+                    className={archived ? "selected" : ""}
+                    onClick={() => setArchived(true)}
+                  >
+                    الأرشيف
+                  </button>
+                </div>
+                {filtered(
+                  s.horses.filter((h) =>
+                    archived
+                      ? h.status === "archived"
+                      : h.status !== "archived",
+                  ),
+                  ["name", "ownerName"],
+                ).map((h) => (
+                  <button
+                    className="horse-card card"
+                    key={h.id}
+                    onClick={() => horseDetail(h)}
+                  >
+                    <div className="horse-avatar">
+                      <HorseIcon size={36} />
+                    </div>
+                    <div>
+                      <h2>{h.name}</h2>
+                      <p>{h.ownerName}</p>
+                      <span className="pill">
+                        {status[h.status] || h.status}
+                      </span>
+                    </div>
+                    <ChevronLeft />
+                  </button>
+                ))}
+                {!filtered(
+                  s.horses.filter((h) =>
+                    archived
+                      ? h.status === "archived"
+                      : h.status !== "archived",
+                  ),
+                  ["name", "ownerName"],
+                ).length && <Empty />}
+              </>
+            )}
+            {tab === "requests" && (
+              <>
+                {heading(
+                  isStaff
+                    ? "من الطلب إلى اعتماد المالك"
+                    : "تابع رحلة تسجيل خيلك",
+                  !isStaff ? (
+                    <button
+                      className="round-add"
+                      aria-label="طلب تسجيل خيل"
+                      onClick={newRequest}
+                    >
+                      <Plus />
+                    </button>
+                  ) : undefined,
+                )}
+                {s.registrationRequests
+                  .slice()
+                  .reverse()
+                  .map((r) => (
+                    <section className="card" key={r.id}>
+                      <div className="spread">
+                        <h2>{r.horseName}</h2>
+                        <span
+                          className={`pill ${r.status === "rejected" ? "red" : ""}`}
+                        >
+                          {status[r.status]}
+                        </span>
+                      </div>
+                      <p className="muted">
+                        {r.ownerName} · العمر {r.age} · {status[r.requestType]}
+                      </p>
+                      {r.registrationNum && (
+                        <p>رقم التسجيل: {r.registrationNum}</p>
+                      )}
+                      {r.notes && <p>{r.notes}</p>}
+                      {r.boardingFee !== undefined && (
+                        <div className="big-number">
+                          {money(r.boardingFee)} <small>ر.س / شهر</small>
+                        </div>
+                      )}
+                      {r.supervisorNotes && (
+                        <p className="notice">{r.supervisorNotes}</p>
+                      )}
+                      {isStaff &&
+                        ["pending", "reviewing"].includes(r.status) && (
+                          <Button
+                            kind="gold"
+                            onClick={() =>
+                              setForm({
+                                title: "مراجعة طلب " + r.horseName,
+                                fields: [
+                                  {
+                                    name: "boardingFee",
+                                    label: "رسوم الإيواء الشهرية",
+                                    type: "number",
+                                    min: 0,
+                                    required: true,
+                                  },
+                                  {
+                                    name: "supervisorNotes",
+                                    label: "ملاحظات المشرف",
+                                    type: "textarea",
+                                  },
+                                  {
+                                    name: "status",
+                                    label: "القرار",
+                                    options: [
+                                      [
+                                        "awaiting_owner_approval",
+                                        "إرسال العرض للمالك",
+                                      ],
+                                      ["rejected", "رفض الطلب"],
+                                    ],
+                                  },
+                                ],
+                                values: {
+                                  boardingFee: 0,
+                                  status: "awaiting_owner_approval",
+                                },
+                                submit: (d) =>
+                                  execute({
+                                    action: "request.review",
+                                    id: r.id,
+                                    data: d,
+                                  }),
+                              })
+                            }
+                          >
+                            مراجعة وتحديد الرسوم
+                          </Button>
+                        )}
+                      {!isStaff && r.status === "awaiting_owner_approval" && (
+                        <Button
+                          kind="gold"
+                          onClick={() =>
+                            confirm(
+                              "الموافقة وتسجيل الخيل",
+                              `توافق على رسوم إيواء ${money(r.boardingFee)} ر.س شهريًا. يبدأ الاستحقاق بعد شهر من التسجيل.`,
+                              () =>
+                                execute({ action: "request.accept", id: r.id }),
+                            )
+                          }
+                        >
+                          موافقة وتسجيل الخيل
+                        </Button>
+                      )}
+                    </section>
+                  ))}
+                {!s.registrationRequests.length && (
+                  <Empty text="ليس لديك طلبات تسجيل حتى الآن" />
+                )}
+              </>
+            )}
+            {tab === "inventory" && isStaff && (
+              <>
+                {heading(
+                  "الرصيد والحركة في مكان واحد",
+                  <button
+                    className="round-add"
+                    aria-label="إضافة صنف"
+                    onClick={() => mealForm()}
+                  >
+                    <Plus />
+                  </button>,
+                )}
+                {searchBox}
+                {filtered(s.mealTypes, ["name"]).map((m) => (
+                  <section className="card" key={m.id}>
+                    <div className="spread">
+                      <h2>{m.name}</h2>
+                      <span
+                        className={`pill ${m.currentStock <= m.minThreshold ? "red" : ""}`}
+                      >
+                        {m.currentStock <= m.minThreshold
+                          ? "يحتاج توريد"
+                          : "متوفر"}
+                      </span>
+                    </div>
+                    <div className="big-number">
+                      {money(m.currentStock)} <small>{m.unit}</small>
+                    </div>
+                    <p className="muted">
+                      حد التنبيه {m.minThreshold} · سعر الوحدة{" "}
+                      {money(m.pricePerUnit)} ر.س
+                    </p>
+                    <div className="actions">
+                      <Button kind="gold" onClick={() => move(m, "add")}>
+                        + إضافة
+                      </Button>
+                      <Button kind="outline" onClick={() => move(m, "remove")}>
+                        − صرف
+                      </Button>
+                    </div>
+                    <div className="text-actions">
+                      <button onClick={() => mealForm(m)}>تعديل</button>
+                      <button
+                        onClick={() =>
+                          setDetail({
+                            title: "حركات " + m.name,
+                            content: (
+                              <>
+                                {s.inventoryTransactions
+                                  .filter((t) => t.mealTypeId === m.id)
+                                  .reverse()
+                                  .map((t) => (
+                                    <div className="record" key={t.id}>
+                                      <b>
+                                        {t.type === "add" ? "إضافة" : "صرف"}{" "}
+                                        {t.amount}
+                                      </b>
+                                      <p>{t.reason || "دون ملاحظات"}</p>
+                                      <small>
+                                        {String(t.createdAt)
+                                          .slice(0, 16)
+                                          .replace("T", " ")}{" "}
+                                        · الرصيد {t.balance}
+                                      </small>
+                                    </div>
+                                  ))}
+                              </>
+                            ),
+                          })
+                        }
+                      >
+                        سجل الحركات
+                      </button>
+                      <button
+                        className="danger-text"
+                        onClick={() =>
+                          confirm(
+                            "حذف الصنف",
+                            "يمكن حذف الصنف إذا كان رصيده صفرًا وغير مرتبط ببرنامج تغذية.",
+                            () => execute({ action: "meal.delete", id: m.id }),
+                          )
+                        }
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  </section>
+                ))}
+                {!s.mealTypes.length && <Empty />}
+              </>
+            )}
+            {tab === "income" && (
+              <>
+                {heading(
+                  isStaff ? "استحقاق واضح. تحصيل موثق." : "سجل إيواء خيلك",
+                )}
+                <div className="income-summary">
+                  <span>المحصل في {month}</span>
+                  <strong>
+                    {money(stats.collected)} <small>ر.س</small>
+                  </strong>
+                </div>
+                {searchBox}
+                <div className="tabs">
+                  <button
+                    className={incomeTab === "pending" ? "selected" : ""}
+                    onClick={() => setIncomeTab("pending")}
+                  >
+                    الاستحقاقات
+                  </button>
+                  <button
+                    className={incomeTab === "collected" ? "selected" : ""}
+                    onClick={() => setIncomeTab("collected")}
+                  >
+                    المحصل
+                  </button>
+                </div>
+                {incomeTab === "pending"
+                  ? filtered(
+                      active.filter((h) =>
+                        ["boarding", "boarding_breeding"].includes(h.status),
+                      ),
+                      ["name", "ownerName"],
+                    ).map((h) => (
+                      <section className="card" key={h.id}>
+                        <div className="spread">
+                          <h2>{h.name}</h2>
+                          <span
+                            className={`pill ${h.dueDate < today() ? "red" : ""}`}
+                          >
+                            {h.dueDate < today() ? "متأخر" : "مستحق"}
+                          </span>
+                        </div>
+                        <p className="muted">
+                          {h.ownerName} · {h.dueDate || "حدد تاريخ الاستحقاق"}
+                        </p>
+                        <div className="big-number">
+                          {money(isStaff ? bill(s, h).amount : h.boardingFee)}{" "}
+                          <small>ر.س</small>
+                        </div>
+                        {isStaff ? (
+                          <Button
+                            kind="gold"
+                            disabled={!h.dueDate}
+                            onClick={() => collect(h)}
+                          >
+                            تسجيل التحصيل
+                          </Button>
+                        ) : (
+                          <p className="muted small">
+                            رسوم الإيواء؛ المصروفات الإضافية تظهر في السند بعد
+                            التحصيل.
+                          </p>
+                        )}
+                      </section>
+                    ))
+                  : filtered(s.income, ["horseName", "ownerName"])
+                      .slice()
+                      .reverse()
+                      .map((i) => (
+                        <section className="card" key={i.id}>
+                          <div className="spread">
+                            <h2>{i.horseName}</h2>
+                            <span className="pill">
+                              <Check size={12} />
+                              محصل
+                            </span>
+                          </div>
+                          <p>{i.ownerName}</p>
+                          <div className="big-number">
+                            {money(i.amount)} <small>ر.س</small>
+                          </div>
+                          <p className="muted small">
+                            الاستحقاق {i.dueDate} · التحصيل{" "}
+                            {String(i.collectedAt).slice(0, 10)}
+                          </p>
+                          {i.expenseShares?.map((e: any) => (
+                            <p className="small" key={e.expenseId}>
+                              {e.name}: {money(e.amount)} ر.س
+                            </p>
+                          ))}
+                        </section>
+                      ))}
+                {incomeTab === "collected" && !s.income.length && (
+                  <Empty text="لا توجد عمليات تحصيل بعد" />
+                )}
+              </>
+            )}
+            {tab === "expenses" && isStaff && (
+              <>
+                {heading(
+                  "سجّل مصروفات التشغيل",
+                  <button
+                    className="round-add"
+                    aria-label="إضافة مصروف"
+                    onClick={() => expenseForm()}
+                  >
+                    <Plus />
+                  </button>,
+                )}
+                {s.expenses.map((e) => (
+                  <section className="card" key={e.id}>
+                    <div className="spread">
+                      <h2>{e.name}</h2>
+                      <b>{money(e.cost)} ر.س</b>
+                    </div>
+                    <p className="muted">
+                      {frequencies.find((f) => f[0] === e.frequency)?.[1]} ·{" "}
+                      {e.horseIds?.length
+                        ? e.horseIds
+                            .map(
+                              (id: string) =>
+                                s.horses.find((h) => h.id === id)?.name || id,
+                            )
+                            .join("، ")
+                        : "مصروف عام"}
+                    </p>
+                    {e.collectedHorseIds?.length > 0 ? (
+                      <p className="notice">
+                        مرتبط بتحصيل؛ يحتفظ السجل بتوزيع التكلفة الأصلي.
+                      </p>
+                    ) : (
+                      <div className="actions">
+                        <Button kind="outline" onClick={() => expenseForm(e)}>
+                          تعديل
+                        </Button>
+                        {isAdmin && (
+                          <Button
+                            kind="danger"
+                            onClick={() =>
+                              confirm(
+                                "حذف المصروف",
+                                `سيحذف المصروف «${e.name}».`,
+                                () =>
+                                  execute({
+                                    action: "expense.delete",
+                                    id: e.id,
+                                  }),
+                              )
+                            }
+                          >
+                            حذف
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                ))}
+                {!s.expenses.length && <Empty />}
+              </>
+            )}
+            {tab === "members" && isStaff && (
+              <>
+                {heading(
+                  "العضوية والصلاحيات",
+                  isAdmin ? (
+                    <button
+                      className="round-add"
+                      aria-label="تسجيل عضو"
+                      onClick={() => memberForm()}
+                    >
+                      <Plus />
+                    </button>
+                  ) : undefined,
+                )}
+                {searchBox}
+                {filtered(
+                  s.users.filter((u) => !u.deleted),
+                  ["displayName", "email", "phoneNumber"],
+                ).map((u) => (
+                  <section className="card" key={u.id}>
+                    <div className="spread">
+                      <h2>{u.displayName}</h2>
+                      <span className={`pill ${u.disabled ? "red" : ""}`}>
+                        {u.disabled ? "معطل" : roles[u.role]}
+                      </span>
+                    </div>
+                    <p className="muted ltr">{u.email}</p>
+                    <p className="muted">{u.phoneNumber}</p>
+                    {isAdmin && u.id !== a.uid && (
+                      <>
+                        <div className="actions">
+                          <Button kind="outline" onClick={() => memberForm(u)}>
+                            تعديل الصلاحية
+                          </Button>
+                          <Button
+                            kind="outline"
+                            onClick={() =>
+                              confirm(
+                                u.disabled ? "تفعيل العضو" : "تعطيل العضو",
+                                u.disabled
+                                  ? "سيتمكن العضو من الدخول مجددًا."
+                                  : "سيمنع العضو من استخدام الحساب حتى إعادة تفعيله.",
+                                () =>
+                                  member(
+                                    u.disabled ? "enable" : "disable",
+                                    u.id,
+                                  ),
+                              )
+                            }
+                          >
+                            {u.disabled ? "تفعيل" : "تعطيل"}
+                          </Button>
+                        </div>
+                        <button
+                          className="danger-text"
+                          onClick={() =>
+                            confirm(
+                              "حذف العضو",
+                              "يحذف حساب الدخول ويُحفظ أثره في السجلات المالية. لا يسمح بالحذف عند وجود خيل نشطة مرتبطة به.",
+                              () => member("delete", u.id),
+                            )
+                          }
+                        >
+                          حذف العضو
+                        </button>
+                      </>
+                    )}
+                  </section>
+                ))}
+              </>
+            )}
+            {tab === "activity" && (
+              <>
+                {heading("التنبيهات وآخر التغييرات")}
+                {isStaff && pending.length > 0 && (
+                  <Button kind="gold" onClick={() => go("requests")}>
+                    {pending.length} طلبات تنتظر مراجعتك
+                  </Button>
+                )}
+                {s.activities
+                  .slice()
+                  .reverse()
+                  .slice(0, 100)
+                  .map((l) => (
+                    <div className="record" key={l.id}>
+                      <b>{actionLabel(l.action)}</b>
+                      <p>{l.performedByName || "الإدارة"}</p>
+                      <small>
+                        {String(l.createdAt).slice(0, 16).replace("T", " ")}
+                      </small>
+                    </div>
+                  ))}
+                {!s.activities.length && (
+                  <Empty text="ستظهر العمليات المسجلة هنا" />
+                )}
+              </>
+            )}
+            {tab === "more" && (
+              <>
+                {heading(roles[a.role])}
+                <section className="account-card">
+                  <div className="profile-icon">{a.displayName.charAt(0)}</div>
+                  <h2>{a.displayName}</h2>
+                  <span className="pill">{roles[a.role]}</span>
+                </section>
+                <section className="card">
+                  {isStaff && (
+                    <>
+                      <MenuLink
+                        icon={<ClipboardList />}
+                        label="طلبات تسجيل الخيل"
+                        count={pending.length}
+                        onClick={() => go("requests")}
+                      />
+                      <MenuLink
+                        icon={<Wallet />}
+                        label="المصروفات"
+                        onClick={() => go("expenses")}
+                      />
+                      {isAdmin && (
+                        <MenuLink
+                          icon={<Users />}
+                          label="إدارة الأعضاء والصلاحيات"
+                          onClick={() => go("members")}
+                        />
+                      )}
+                    </>
+                  )}
+                  <MenuLink
+                    icon={<History />}
+                    label="سجل العمليات"
+                    onClick={() => go("activity")}
+                  />
+                  <MenuLink
+                    icon={<Users />}
+                    label="بيانات حسابي"
+                    onClick={() =>
+                      setForm({
+                        title: "بيانات حسابي",
+                        fields: [
+                          {
+                            name: "displayName",
+                            label: "الاسم",
+                            required: true,
+                          },
+                          { name: "phoneNumber", label: "الجوال", type: "tel" },
+                        ],
+                        values: s.users.find((u) => u.id === a.uid) || {},
+                        submit: (d) =>
+                          execute({ action: "profile.save", data: d }),
+                      })
+                    }
+                  />
+                  {isAdmin && (
+                    <MenuLink
+                      icon={<SlidersHorizontal />}
+                      label="هوية الإسطبل"
+                      onClick={() =>
+                        setForm({
+                          title: "بيانات الإسطبل",
+                          fields: [
+                            {
+                              name: "stableName",
+                              label: "اسم الإسطبل",
+                              required: true,
+                            },
+                            { name: "phone", label: "الجوال", type: "tel" },
+                            { name: "address", label: "العنوان" },
+                          ],
+                          values: s.settings[0] || { stableName: name },
+                          submit: (d) =>
+                            execute({ action: "settings.save", data: d }),
+                          note: "أيقونة التطبيق تستخدم شعار الأثيل الأصلي المرفق.",
+                        })
+                      }
+                    />
+                  )}
+                </section>
+                <Button kind="outline" onClick={() => void run(logout)}>
+                  <LogOut size={18} />
+                  تسجيل الخروج
+                </Button>
+                {demo && (
+                  <Button
+                    kind="outline"
+                    onClick={() =>
+                      confirm(
+                        "إعادة بيانات التجربة",
+                        "ستحذف التغييرات المحلية وتعود بيانات التجربة إلى البداية.",
+                        async () => resetDemo(),
+                      )
+                    }
+                  >
+                    إعادة بيانات التجربة
+                  </Button>
+                )}
+                <p className="muted small center">
+                  الأثيل · الإصدار 1.0.0 · أندرويد
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </main>
+      {a && (
+        <nav aria-label="التنقل الرئيسي">
+          {nav.map(([key, label, Icon]) => {
+            const I = Icon as typeof LayoutDashboard;
+            return (
+              <button
+                key={String(key)}
+                className={tab === key ? "active" : ""}
+                onClick={() => go(String(key))}
+              >
+                <I size={22} />
+                <span>{String(label)}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={18} />
+          {toast}
+        </div>
+      )}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button aria-label="إغلاق الخطأ" onClick={() => setError("")}>
+            <X size={18} />
+          </button>
+        </div>
+      )}
+      {busy && (
+        <div className="busy" role="status">
+          جارٍ تنفيذ العملية…
+        </div>
+      )}
+      {loginOpen && (
+        <Modal title="أهلًا بك في الأثيل" close={() => setLoginOpen(false)}>
+          <img className="login-logo" src="/logo.jpeg" alt="شعار الأثيل" />
+          <p>سجل دخولك للوصول إلى لوحة المعلومات وطلبات الخيل.</p>
+          {demo ? (
+            <>
+              <div className="notice">
+                حسابات للتجربة فقط؛ البيانات محلية على هذا الجهاز.
+              </div>
+              {Object.entries(roles).map(([r, label]) => (
+                <Button
+                  key={r}
+                  kind={r === "admin" ? "gold" : "outline"}
+                  onClick={() => void run(() => login(r))}
+                >
+                  {label}
+                </Button>
+              ))}
+            </>
+          ) : (
+            <Button kind="gold" onClick={() => void run(() => login())}>
+              التسجيل أو الدخول باستخدام Google
+            </Button>
+          )}
+          <p className="muted small">
+            الحساب الجديد يبدأ كعضو. صلاحيات الإدارة يمنحها مدير الإسطبل.
+          </p>
+        </Modal>
+      )}
+      {form && (
+        <Modal title={form.title} close={() => !busy && setForm(null)}>
+          <>
+            {error && (
+              <p className="notice" role="alert">
+                {error}
+              </p>
+            )}
+            <FormView
+              form={form}
+              state={s}
+              busy={busy}
+              onSubmit={(d) => void run(() => form.submit(d))}
+            />
+          </>
+        </Modal>
+      )}
+      {detail && (
+        <Modal title={detail.title} close={() => !busy && setDetail(null)}>
+          {error && (
+            <p className="notice" role="alert">
+              {error}
+            </p>
+          )}
+          {detail.content}
+        </Modal>
+      )}
+    </div>
+  );
+}
+function MenuLink({
+  icon,
+  label,
+  count,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  count?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button className="list-link" onClick={onClick}>
+      {icon}
+      <span>{label}</span>
+      {!!count && <b className="pill">{count}</b>}
+      <ChevronLeft size={18} />
+    </button>
+  );
+}
+function Modal({
+  title,
+  children,
+  close,
+}: {
+  title: string;
+  children: ReactNode;
+  close: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+    return () => ref.current?.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      onCancel={(e) => {
+        e.preventDefault();
+        close();
+      }}
+      aria-label={title}
+    >
+      <div className="modal-heading">
+        <h2>{title}</h2>
+        <button className="icon-button" onClick={close} aria-label="إغلاق">
+          <X />
+        </button>
+      </div>
+      <div className="modal-body">{children}</div>
+    </dialog>
+  );
+}
+function FormView({
+  form,
+  state,
+  busy,
+  onSubmit,
+}: {
+  form: Form;
+  state: State;
+  busy: boolean;
+  onSubmit: (d: Record<string, any>) => void;
+}) {
+  const [v, set] = useState<Record<string, any>>(() =>
+    structuredClone(form.values),
+  );
+  const update = (name: string, value: unknown) =>
+    set((p) => ({ ...p, [name]: value }));
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(v);
+      }}
+    >
+      {form.note && <p className="notice">{form.note}</p>}
+      {form.fields.map((f) => (
+        <label className="field" key={f.name}>
+          <span>
+            {f.label}
+            {f.required && <b> *</b>}
+          </span>
+          {f.options ? (
+            <select
+              required={f.required}
+              value={v[f.name] ?? f.options[0]?.[0] ?? ""}
+              onChange={(e) => update(f.name, e.target.value)}
+            >
+              {f.options.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          ) : f.type === "textarea" ? (
+            <textarea
+              maxLength={500}
+              value={v[f.name] ?? ""}
+              onChange={(e) => update(f.name, e.target.value)}
+            />
+          ) : (
+            <input
+              type={f.type || "text"}
+              required={f.required}
+              min={f.min}
+              max={f.max}
+              step={f.type === "number" ? "0.01" : undefined}
+              maxLength={f.type === "text" || !f.type ? 500 : undefined}
+              value={v[f.name] ?? ""}
+              onChange={(e) => update(f.name, e.target.value)}
+            />
+          )}
+        </label>
+      ))}
+      {form.feeding && (
+        <fieldset>
+          <legend>برنامج التغذية اليومي</legend>
+          {(v.feeding || []).map((f: any, i: number) => (
+            <div className="feeding-row" key={i}>
+              <select
+                aria-label={`نوع التغذية ${i + 1}`}
+                required
+                value={f.mealTypeId}
+                onChange={(e) =>
+                  update(
+                    "feeding",
+                    v.feeding.map((x: any, j: number) =>
+                      i === j ? { ...x, mealTypeId: e.target.value } : x,
+                    ),
+                  )
+                }
+              >
+                {state.mealTypes.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.unit})
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label={`الكمية اليومية ${i + 1}`}
+                type="number"
+                min="0.01"
+                step="0.01"
+                required
+                value={f.quantity}
+                onChange={(e) =>
+                  update(
+                    "feeding",
+                    v.feeding.map((x: any, j: number) =>
+                      i === j ? { ...x, quantity: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="إزالة التغذية"
+                onClick={() =>
+                  update(
+                    "feeding",
+                    v.feeding.filter((_: any, j: number) => i !== j),
+                  )
+                }
+              >
+                <X size={18} />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="button outline"
+            disabled={!state.mealTypes.length}
+            onClick={() =>
+              update("feeding", [
+                ...(v.feeding || []),
+                { mealTypeId: state.mealTypes[0]?.id, quantity: 1 },
+              ])
+            }
+          >
+            إضافة نوع تغذية
+          </button>
+        </fieldset>
+      )}
+      {form.horses && (
+        <fieldset>
+          <legend>ربط المصروف بالخيل</legend>
+          {state.horses
+            .filter((h) => h.status !== "archived")
+            .map((h) => (
+              <label className="check-field" key={h.id}>
+                <input
+                  type="checkbox"
+                  checked={(v.horseIds || []).includes(h.id)}
+                  onChange={(e) =>
+                    update(
+                      "horseIds",
+                      e.target.checked
+                        ? [...(v.horseIds || []), h.id]
+                        : (v.horseIds || []).filter(
+                            (id: string) => id !== h.id,
+                          ),
+                    )
+                  }
+                />
+                {h.name} — {h.ownerName}
+              </label>
+            ))}
+        </fieldset>
+      )}
+      <button className="button gold" type="submit" disabled={busy}>
+        {busy ? "جارٍ الحفظ…" : "حفظ ومتابعة"}
+      </button>
+    </form>
+  );
+}
+function actionLabel(action: string) {
+  return (
+    (
+      {
+        "horse.save": "تسجيل أو تحديث خيل",
+        "horse.checkout": "إخراج خيل",
+        "horse.restore": "استعادة خيل",
+        "request.create": "طلب تسجيل جديد",
+        "request.review": "مراجعة طلب",
+        "request.accept": "اعتماد وتسجيل الخيل",
+        "meal.save": "تحديث صنف",
+        "meal.delete": "حذف صنف",
+        "stock.move": "حركة مخزون",
+        "expense.save": "تسجيل مصروف",
+        "expense.delete": "حذف مصروف",
+        "income.collect": "تحصيل رسوم الإيواء",
+        "profile.save": "تحديث الحساب",
+        "settings.save": "تحديث بيانات الإسطبل",
+        "member.create": "تسجيل عضو",
+        "member.update": "تحديث صلاحيات عضو",
+        "member.disable": "تعطيل عضو",
+        "member.enable": "تفعيل عضو",
+        "member.delete": "حذف عضو",
+      } as Record<string, string>
+    )[action] || "تحديث سجل"
+  );
+}
