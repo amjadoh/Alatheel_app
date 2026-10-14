@@ -1582,6 +1582,15 @@ export default function App() {
                   <LogOut size={18} />
                   تسجيل الخروج
                 </Button>
+                {isAdmin && (
+                  <Button
+                    kind="outline"
+                    disabled={busy}
+                    onClick={() => void run(() => member("invite", a.uid))}
+                  >
+                    إرسال رابط التطبيق إلى بريدي
+                  </Button>
+                )}
                 <p className="muted small center">
                   الأثيل · الإصدار 1.1.0 · أندرويد
                 </p>

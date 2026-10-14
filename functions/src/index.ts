@@ -130,7 +130,7 @@ export const operate = onCall(options, async (request) => {
         return { ok: true };
       }
       const state = emptyState();
-      state.users = [normalizeRecord("users",p.id,p.data()!)];
+      state.users = [normalizeRecord("users", p.id, p.data()!)];
       // Read only collections required by the operation, inside the same transaction.
       for (const name of needs[c.action]) {
         const snapshot = await tx.get(
@@ -144,8 +144,16 @@ export const operate = onCall(options, async (request) => {
           normalizeRecord(name, doc.id, doc.data()),
         );
       }
-      if(c.action === "income.collect") ensure(!state.expenses.some(e => e.frequency === "once" && e.horseIds?.includes(c.id) && !e.allocations),
-        "توجد مصروفات قديمة تحتاج اعتماد توزيعها من المدير قبل التحصيل");
+      if (c.action === "income.collect")
+        ensure(
+          !state.expenses.some(
+            (e) =>
+              e.frequency === "once" &&
+              e.horseIds?.includes(c.id) &&
+              !e.allocations,
+          ),
+          "توجد مصروفات قديمة تحتاج اعتماد توزيعها من المدير قبل التحصيل",
+        );
       const next = applyCommand(state, actor, c);
       for (const name of collections) {
         const before = new Map(state[name].map((r) => [r.id, r]));
@@ -269,7 +277,7 @@ export const manageMember = onCall(options, async (request) => {
       return { ok: true, uid: u.uid };
     }
     ensure(
-      typeof id === "string" && id !== caller,
+      typeof id === "string" && (action === "invite" || id !== caller),
       "لا يمكنك تغيير صلاحيتك أو تعطيل وحذف حسابك من هذه الشاشة",
     );
     const ref = db.doc(`users/${id}`);
