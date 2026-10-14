@@ -3,6 +3,7 @@ export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
   "users",
+  "owners",
   "horses",
   "registrationRequests",
   "mealTypes",
@@ -19,6 +20,7 @@ export type Actor = {
   role: Role;
   displayName: string;
   disabled?: boolean;
+  ownerRecordId?: string;
 };
 export type Command = {
   action: string;
@@ -28,6 +30,7 @@ export type Command = {
 };
 export const emptyState = (): State => ({
   users: [],
+  owners: [],
   horses: [],
   registrationRequests: [],
   mealTypes: [],
@@ -122,12 +125,14 @@ export function visibleState(s: State, a: Actor): State {
   return {
     ...emptyState(),
     users: s.users.filter((u) => u.id === a.uid),
-    horses: s.horses.filter((h) => h.ownerId === a.uid),
+    horses: s.horses.filter((h) => h.ownerId === (a.ownerRecordId || a.uid)),
     registrationRequests: s.registrationRequests.filter(
-      (r) => r.ownerId === a.uid,
+      (r) => r.ownerId === (a.ownerRecordId || a.uid),
     ),
-    income: s.income.filter((i) => i.ownerId === a.uid),
-    activities: s.activities.filter((l) => l.ownerId === a.uid),
+    income: s.income.filter((i) => i.ownerId === (a.ownerRecordId || a.uid)),
+    activities: s.activities.filter(
+      (l) => l.ownerId === (a.ownerRecordId || a.uid),
+    ),
     settings: s.settings,
   };
 }
@@ -150,6 +155,31 @@ export function applyCommand(
   if (!["request.create", "request.accept", "profile.save"].includes(c.action))
     ensure(staff(a), "هذه العملية متاحة للإدارة والموظف فقط");
   switch (c.action) {
+    case "owner.save": {
+      const old = c.id ? find(s, "owners", id) : null;
+      const email = text(d.email, 200).toLowerCase();
+      ensure(
+        !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
+        "البريد غير صحيح",
+      );
+      put(s, "owners", {
+        ...old,
+        id,
+        displayName: required(d.displayName, "اسم المالك").slice(0, 100),
+        phoneNumber: text(d.phoneNumber, 30),
+        email,
+        notes: text(d.notes),
+        createdAt: old?.createdAt ?? now,
+        updatedAt: now,
+      });
+      // Keep current horse labels in sync; collected receipts retain their historical name.
+      for (const h of s.horses.filter((h) => h.ownerId === id)) {
+        h.ownerName = s.owners.find((o) => o.id === id)!.displayName;
+        h.updatedAt = now;
+      }
+      ownerId = id;
+      break;
+    }
     case "request.create": {
       ensure(!staff(a), "استخدم إضافة خيل من صفحة الخيل");
       ensure(
@@ -158,7 +188,7 @@ export function applyCommand(
       );
       s.registrationRequests.push({
         id: c.requestId,
-        ownerId: a.uid,
+        ownerId: a.ownerRecordId || a.uid,
         ownerName: a.displayName,
         horseName: required(d.horseName, "اسم الخيل"),
         age: required(d.age, "العمر"),
@@ -169,7 +199,7 @@ export function applyCommand(
         createdAt: now,
         updatedAt: now,
       });
-      ownerId = a.uid;
+      ownerId = a.ownerRecordId || a.uid;
       break;
     }
     case "request.review": {
@@ -193,7 +223,10 @@ export function applyCommand(
     }
     case "request.accept": {
       const r = find(s, "registrationRequests", id);
-      ensure(r.ownerId === a.uid, "يمكنك الموافقة على طلبك فقط");
+      ensure(
+        r.ownerId === (a.ownerRecordId || a.uid),
+        "يمكنك الموافقة على طلبك فقط",
+      );
       ensure(
         r.status === "awaiting_owner_approval",
         "الطلب ليس بانتظار موافقتك",
@@ -216,14 +249,15 @@ export function applyCommand(
         updatedAt: now,
       });
       Object.assign(r, { status: "approved", horseId: hid, updatedAt: now });
-      ownerId = a.uid;
+      ownerId = a.ownerRecordId || a.uid;
       break;
     }
     case "horse.save": {
       const old = c.id ? find(s, "horses", id) : null;
       ensure(!old || old.status !== "archived", "استعد الخيل قبل تعديله");
-      const owner = find(s, "users", d.ownerId);
-      ensure(!owner.disabled, "حساب المالك معطل");
+      const owner =
+        s.owners.find((o) => o.id === d.ownerId) || find(s, "users", d.ownerId);
+      ensure(!owner.disabled && !owner.deleted, "سجل المالك معطل أو محذوف");
       ensure(
         ["boarding", "boarding_breeding", "private"].includes(d.status),
         "حالة الخيل غير صحيحة",

@@ -29,6 +29,7 @@ import {
   emptyState,
   visibleState,
   ensure,
+  staff,
 } from "../functions/src/domain";
 export { staff, bill, money, nextMonth } from "../functions/src/domain";
 export type { Actor, State, Row, Command, Role } from "../functions/src/domain";
@@ -105,24 +106,34 @@ export function connect(callback: typeof emit) {
           void signOut(auth!);
           return;
         }
-        const changed = actor?.role !== p.role;
+        const changed =
+          actor?.role !== p.role || actor?.ownerRecordId !== p.ownerRecordId;
         actor = {
           uid: current.uid,
           displayName: p.displayName,
           role: p.role,
           disabled: p.disabled,
+          ownerRecordId: p.ownerRecordId,
         };
         if (changed) {
           stop();
           state = emptyState();
+          if (!staff(actor))
+            state.users = [normalizeRecord("users", current.uid, p)];
           subscribeData();
           subscriptions.push(
             onSnapshot(doc(db!, "users", current.uid), (profile) => {
               const u = profile.data();
-              if (u?.disabled || u?.role !== actor?.role) {
+              if (
+                u?.disabled ||
+                u?.role !== actor?.role ||
+                u?.ownerRecordId !== actor?.ownerRecordId
+              ) {
                 void signOut(auth!);
               } else if (u && actor) {
                 actor.displayName = u.displayName;
+                if (!staff(actor))
+                  state.users = [normalizeRecord("users", current.uid, u)];
                 publish();
               }
             }),
@@ -152,9 +163,10 @@ function subscribeData() {
   if (!db || !actor) return;
   const a = actor;
   for (const c of collections) {
+    if (c === "users" && !staff(a)) continue; // Own profile is already watched by document ID.
     if (
       !["admin", "employee"].includes(a.role) &&
-      ["mealTypes", "inventoryTransactions", "expenses"].includes(c)
+      ["owners", "mealTypes", "inventoryTransactions", "expenses"].includes(c)
     )
       continue;
     const ref = collection(db, storageCollection(c));
@@ -164,7 +176,7 @@ function subscribeData() {
         : ["horses", "registrationRequests", "income", "activities"].includes(
               c,
             ) && !["admin", "employee"].includes(a.role)
-          ? query(ref, where("ownerId", "==", a.uid))
+          ? query(ref, where("ownerId", "==", a.ownerRecordId || a.uid))
           : ref;
     subscriptions.push(
       onSnapshot(

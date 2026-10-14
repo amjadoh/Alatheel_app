@@ -6,6 +6,7 @@ import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { createTransport } from "nodemailer";
 import { invitationMessage } from "./invitations";
+import { assertOwnerLink, invitationRequested } from "./owners";
 import { storageCollection, normalizeRecord } from "./records";
 import {
   applyCommand,
@@ -34,10 +35,11 @@ const options = {
   maxInstances: 5,
 };
 const needs: Record<string, Collection[]> = {
+  "owner.save": ["owners", "horses"],
   "request.create": [],
   "request.review": ["registrationRequests"],
   "request.accept": ["registrationRequests", "horses"],
-  "horse.save": ["horses", "users", "mealTypes"],
+  "horse.save": ["horses", "owners", "users", "mealTypes"],
   "horse.checkout": ["horses"],
   "horse.restore": ["horses"],
   "meal.save": ["mealTypes"],
@@ -245,7 +247,51 @@ export const manageMember = onCall(options, async (request) => {
               !old.data()?.deleted),
           "العضو مسجل بالفعل؛ استخدم تعديل العضو",
         );
+        const ownerId =
+          data.ownerRecordId || (data.role === "owner" ? u.uid : "");
+        ensure(
+          !ownerId || /^[a-zA-Z0-9_-]{1,128}$/.test(ownerId),
+          "معرف المالك غير صحيح",
+        );
+        const ownerRef = ownerId ? db.doc(`owners/${ownerId}`) : null;
+        const ownerSnap = ownerRef ? await tx.get(ownerRef) : null;
+        if (data.ownerRecordId || ownerSnap?.exists) {
+          assertOwnerLink(
+            ownerSnap?.exists
+              ? { ...ownerSnap.data(), id: ownerId }
+              : undefined,
+            u.uid,
+            u.email!,
+            old.data()?.ownerRecordId,
+          );
+          const legacy = await tx.get(
+            db.collection("horses").where("ownerId", "==", u.uid).limit(1),
+          );
+          ensure(
+            ownerId === u.uid || legacy.empty,
+            "الحساب مرتبط بخيل قديمة؛ يلزم توحيد سجل المالك قبل الربط",
+          );
+        }
+        if (ownerRef)
+          tx.set(
+            ownerRef,
+            {
+              ...(!ownerSnap?.exists
+                ? {
+                    displayName: data.displayName.trim().slice(0, 100),
+                    phoneNumber: data.phoneNumber.trim().slice(0, 30),
+                    email: u.email,
+                    notes: "",
+                    createdAt: Timestamp.now(),
+                  }
+                : {}),
+              linkedUserId: u.uid,
+              updatedAt: Timestamp.now(),
+            },
+            { merge: true },
+          );
         const inviteRef = db.collection("memberInvitations").doc();
+        const sendInvite = invitationRequested(data);
         tx.set(ref, {
           uid: u.uid,
           email: u.email,
@@ -255,18 +301,24 @@ export const manageMember = onCall(options, async (request) => {
           disabled: false,
           membershipApproved: true,
           approvedBy: caller,
-          invitationStatus: invitationsEnabled ? "queued" : "setup_required",
-          invitationId: inviteRef.id,
+          ...(ownerId ? { ownerRecordId: ownerId } : {}),
+          invitationStatus: sendInvite
+            ? invitationsEnabled
+              ? "queued"
+              : "setup_required"
+            : "not_sent",
+          ...(sendInvite ? { invitationId: inviteRef.id } : {}),
           createdAt: new Date().toISOString(),
         });
-        tx.create(inviteRef, {
-          userId: u.uid,
-          email: u.email,
-          displayName: data.displayName.trim(),
-          status: invitationsEnabled ? "queued" : "setup_required",
-          createdBy: caller,
-          createdAt: new Date().toISOString(),
-        });
+        if (sendInvite)
+          tx.create(inviteRef, {
+            userId: u.uid,
+            email: u.email,
+            displayName: data.displayName.trim(),
+            status: invitationsEnabled ? "queued" : "setup_required",
+            createdBy: caller,
+            createdAt: new Date().toISOString(),
+          });
       });
       await db.collection("activities").add({
         action: "member.create",
@@ -322,7 +374,9 @@ export const manageMember = onCall(options, async (request) => {
       );
       if (action === "delete") {
         const horses = await tx.get(
-          db.collection("horses").where("ownerId", "==", id),
+          db
+            .collection("horses")
+            .where("ownerId", "==", target.data()?.ownerRecordId || id),
         );
         ensure(
           !horses.docs.some((h) => h.data().status !== "archived"),
@@ -338,6 +392,32 @@ export const manageMember = onCall(options, async (request) => {
           data.displayName?.trim() && data.phoneNumber?.trim(),
           "أكمل الاسم والجوال",
         );
+        const ownerId =
+          data.ownerRecordId || target.data()?.ownerRecordId || "";
+        ensure(
+          !ownerId || /^[a-zA-Z0-9_-]{1,128}$/.test(ownerId),
+          "معرف المالك غير صحيح",
+        );
+        const ownerRef = ownerId ? db.doc(`owners/${ownerId}`) : null;
+        const ownerSnap = ownerRef ? await tx.get(ownerRef) : null;
+        if (ownerRef) {
+          assertOwnerLink(
+            ownerSnap?.exists
+              ? { ...ownerSnap.data(), id: ownerId }
+              : undefined,
+            id,
+            target.data()?.email,
+            target.data()?.ownerRecordId,
+          );
+          const legacy = await tx.get(
+            db.collection("horses").where("ownerId", "==", id).limit(1),
+          );
+          ensure(
+            ownerId === id || legacy.empty,
+            "الحساب مرتبط بخيل قديمة؛ يلزم توحيد سجل المالك قبل الربط",
+          );
+          tx.update(ownerRef, { linkedUserId: id, updatedAt: Timestamp.now() });
+        }
         tx.update(ref, {
           role: data.role,
           membershipApproved: true,
@@ -345,6 +425,7 @@ export const manageMember = onCall(options, async (request) => {
           disabled: target.data()?.disabled === true,
           displayName: data.displayName.trim().slice(0, 100),
           phoneNumber: data.phoneNumber.trim().slice(0, 30),
+          ...(ownerId ? { ownerRecordId: ownerId } : {}),
         });
       } else tx.update(ref, { disabled: true, authSyncPending: true });
     });
@@ -359,6 +440,20 @@ export const manageMember = onCall(options, async (request) => {
         authSyncPending: false,
         deletedAt: new Date().toISOString(),
       });
+      const deletedMember = await ref.get();
+      if (deletedMember.data()?.ownerRecordId) {
+        const ownerRef = db.doc(
+          `owners/${deletedMember.data()!.ownerRecordId}`,
+        );
+        await db.runTransaction(async (tx) => {
+          const owner = await tx.get(ownerRef);
+          if (owner.exists && owner.data()?.linkedUserId === id)
+            tx.update(ownerRef, {
+              linkedUserId: "",
+              updatedAt: Timestamp.now(),
+            });
+        });
+      }
     }
     if (action === "disable" || action === "enable") {
       await auth.updateUser(id, { disabled: action === "disable" });

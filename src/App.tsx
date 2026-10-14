@@ -256,6 +256,19 @@ export default function App() {
       submit: (d) => execute({ action: "request.create", data: d }),
       note: "تراجع الإدارة الطلب وترسل رسوم الإيواء. بعد موافقتك يُسجل الخيل ويظهر في حسابك.",
     });
+  const ownerForm = (o?: Row) =>
+    setForm({
+      title: o ? "تعديل المالك" : "إضافة مالك",
+      fields: [
+        { name: "displayName", label: "اسم المالك", required: true },
+        { name: "phoneNumber", label: "الجوال", type: "tel" },
+        { name: "email", label: "البريد (اختياري)", type: "email" },
+        { name: "notes", label: "ملاحظات", type: "textarea" },
+      ],
+      values: o || { displayName: "", phoneNumber: "", email: "", notes: "" },
+      note: "سجل لإدارة الخيل والحسابات فقط. الحفظ لا ينشئ حساب دخول ولا يرسل دعوة.",
+      submit: (d) => execute({ action: "owner.save", id: o?.id, data: d }),
+    });
   const horseForm = (h?: Row) =>
     setForm({
       title: h ? "تعديل بيانات الخيل" : "إضافة خيل",
@@ -265,9 +278,22 @@ export default function App() {
           name: "ownerId",
           label: "المالك",
           required: true,
-          options: s.users
-            .filter((u) => !u.disabled && !u.deleted)
-            .map((u) => [u.id, u.displayName]),
+          options: [
+            ["", "اختر المالك"],
+            ...s.owners.map((o) => [o.id, o.displayName] as [string, string]),
+            ...s.users
+              .filter(
+                (u) =>
+                  !u.disabled &&
+                  !u.deleted &&
+                  !u.ownerRecordId &&
+                  !s.owners.some((o) => o.id === u.id),
+              )
+              .map(
+                (u) =>
+                  [u.id, `${u.displayName} (حساب مسجل)`] as [string, string],
+              ),
+          ],
         },
         {
           name: "status",
@@ -296,7 +322,7 @@ export default function App() {
         { name: "notes", label: "ملاحظات", type: "textarea" },
       ],
       values: h || {
-        ownerId: s.users.find((u) => u.role === "owner")?.id || s.users[0]?.id,
+        ownerId: "",
         status: "boarding",
         entryDate: today(),
         dueDate: nextMonth(today()),
@@ -304,6 +330,7 @@ export default function App() {
         feeding: [],
       },
       feeding: true,
+      note: "يسجل المدير الخيل مباشرة بدون موافقة المالك أو دعوته. لإضافة مالك جديد استخدم زر «إضافة مالك» في شاشة الخيل.",
       submit: (d) => execute({ action: "horse.save", id: h?.id, data: d }),
     });
   const mealForm = (m?: Row) =>
@@ -386,7 +413,7 @@ export default function App() {
       note: "عدم تحديد خيل يعني مصروفًا عامًا. المصروف لمرة واحدة يوزع بالتساوي على الخيل المحددة ويضاف للتحصيل مرة واحدة.",
       submit: (d) => execute({ action: "expense.save", id: e?.id, data: d }),
     });
-  const memberForm = (u?: Row) =>
+  const memberForm = (u?: Row, o?: Row) =>
     setForm({
       title: u ? "تعديل عضو وصلاحيته" : "تسجيل عضو جديد",
       fields: [
@@ -412,9 +439,38 @@ export default function App() {
           label: "الصلاحية",
           options: Object.entries(roles) as [string, string][],
         },
+        {
+          name: "ownerRecordId",
+          label: "ربط بسجل مالك (اختياري)",
+          options: [
+            ["", "بدون ربط"],
+            ...s.owners
+              .filter((x) => !x.linkedUserId || x.linkedUserId === u?.id)
+              .map((x) => [x.id, x.displayName] as [string, string]),
+          ],
+        },
+        ...(!u
+          ? [
+              {
+                name: "sendInvitation",
+                label: "دعوة بالبريد",
+                options: [
+                  ["no", "بدون إرسال دعوة"],
+                  ["yes", "إرسال دعوة ورابط التطبيق"],
+                ] as [string, string][],
+              },
+            ]
+          : []),
       ],
-      values: u || { role: "owner" },
-      note: "يدخل العضو بحساب Google المطابق للبريد، ويستقبل دعوة برابط أحدث نسخة عند تفعيل خدمة البريد. يمكنك تعيين مدير ثانٍ من الصلاحية.",
+      values: u || {
+        role: "owner",
+        ownerRecordId: o?.id || "",
+        displayName: o?.displayName || "",
+        phoneNumber: o?.phoneNumber || "",
+        email: o?.email || "",
+        sendInvitation: "no",
+      },
+      note: "هذه الشاشة تمنح حساب Google صلاحية الدخول. إرسال الدعوة اختياري. الربط بسجل المالك يتيح له رؤية خيله والتحصيلات السابقة. لتسجيل بياناته فقط استخدم قسم الملاك.",
       submit: (d) => member(u ? "update" : "create", u?.id, d),
     });
   const horseDetail = (h: Row) => {
@@ -616,6 +672,7 @@ export default function App() {
     requests: "طلبات التسجيل.",
     expenses: "المصروفات.",
     members: "الأعضاء.",
+    owners: "الملاك.",
     more: "إدارة حسابك.",
     activity: "سجل العمليات.",
   };
@@ -938,6 +995,16 @@ export default function App() {
                   ) : undefined,
                 )}
                 {searchBox}
+                {isStaff && (
+                  <div className="actions">
+                    <Button kind="outline" onClick={() => ownerForm()}>
+                      إضافة مالك
+                    </Button>
+                    <Button kind="outline" onClick={() => go("owners")}>
+                      سجل الملاك
+                    </Button>
+                  </div>
+                )}
                 <div className="tabs">
                   <button
                     className={!archived ? "selected" : ""}
@@ -1353,6 +1420,106 @@ export default function App() {
                 {!s.expenses.length && <Empty />}
               </>
             )}
+            {tab === "owners" && isStaff && (
+              <>
+                {heading(
+                  "بيانات الملاك وخيلهم",
+                  <button
+                    className="round-add"
+                    aria-label="إضافة مالك"
+                    onClick={() => ownerForm()}
+                  >
+                    <Plus />
+                  </button>,
+                )}
+                <p className="notice">
+                  إضافة المالك لا تمنحه دخولًا ولا ترسل له دعوة. أنت تدير خيله
+                  وحساباته من هنا.
+                </p>
+                {searchBox}
+                {filtered(s.owners, [
+                  "displayName",
+                  "phoneNumber",
+                  "email",
+                ]).map((o) => {
+                  const horses = s.horses.filter((h) => h.ownerId === o.id);
+                  const linked = s.users.find(
+                    (u) => u.id === o.linkedUserId && !u.deleted,
+                  );
+                  return (
+                    <section className="card" key={o.id}>
+                      <div className="spread">
+                        <h2>{o.displayName}</h2>
+                        <span className="pill">
+                          {linked
+                            ? linked.disabled
+                              ? "دخول معطل"
+                              : "حساب دخول مرتبط"
+                            : "سجل فقط"}
+                        </span>
+                      </div>
+                      <p className="muted">{o.phoneNumber || "بدون جوال"}</p>
+                      {o.email && <p className="muted ltr">{o.email}</p>}
+                      <p>
+                        {horses.filter((h) => h.status !== "archived").length}{" "}
+                        خيل نشطة ·{" "}
+                        {horses.filter((h) => h.status === "archived").length}{" "}
+                        مؤرشفة
+                      </p>
+                      <p className="muted">
+                        إجمالي التحصيل المسجل:{" "}
+                        {money(
+                          s.income
+                            .filter((i) => i.ownerId === o.id)
+                            .reduce((sum, i) => sum + Number(i.amount || 0), 0),
+                        )}{" "}
+                        ر.س
+                      </p>
+                      {o.notes && <p className="muted">{o.notes}</p>}
+                      <div className="actions">
+                        <Button kind="outline" onClick={() => ownerForm(o)}>
+                          تعديل البيانات
+                        </Button>
+                        {isAdmin && !linked && (
+                          <Button
+                            kind="outline"
+                            onClick={() => memberForm(undefined, o)}
+                          >
+                            تفعيل دخول المالك
+                          </Button>
+                        )}
+                        {isAdmin &&
+                          linked &&
+                          linked.id !== a.uid &&
+                          linked.email?.toLowerCase() !==
+                            "amjadoh@gmail.com" && (
+                            <Button
+                              kind="outline"
+                              onClick={() => memberForm(linked)}
+                            >
+                              إدارة حساب الدخول
+                            </Button>
+                          )}
+                      </div>
+                      {horses.map((h) => (
+                        <button
+                          className="menu-link"
+                          key={h.id}
+                          onClick={() => horseDetail(h)}
+                        >
+                          <HorseIcon />
+                          <span>{h.name}</span>
+                          <ChevronLeft />
+                        </button>
+                      ))}
+                    </section>
+                  );
+                })}
+                {!s.owners.length && (
+                  <Empty text="أضف المالك ثم سجّل خيله؛ لا يحتاج حسابًا أو بريدًا." />
+                )}
+              </>
+            )}
             {tab === "members" && isStaff && (
               <>
                 {heading(
@@ -1396,6 +1563,7 @@ export default function App() {
                         {(
                           {
                             queued: "بانتظار الإرسال",
+                            not_sent: "لم تُطلب دعوة",
                             setup_required: "إرسال الدعوات لم يُفعّل بعد",
                             sending: "جارٍ الإرسال",
                             sent: "أُرسلت",
@@ -1431,7 +1599,9 @@ export default function App() {
                                   void run(() => member("invite", u.id))
                                 }
                               >
-                                إعادة إرسال الدعوة
+                                {u.invitationStatus === "not_sent"
+                                  ? "إرسال دعوة"
+                                  : "إعادة إرسال الدعوة"}
                               </Button>
                             )}
                             <Button
@@ -1508,6 +1678,11 @@ export default function App() {
                 <section className="card">
                   {isStaff && (
                     <>
+                      <MenuLink
+                        icon={<Users />}
+                        label="سجل الملاك"
+                        onClick={() => go("owners")}
+                      />
                       <MenuLink
                         icon={<ClipboardList />}
                         label="طلبات تسجيل الخيل"
@@ -1905,6 +2080,7 @@ function actionLabel(action: string) {
     (
       {
         "horse.save": "تسجيل أو تحديث خيل",
+        "owner.save": "تسجيل أو تحديث مالك",
         "horse.checkout": "إخراج خيل",
         "horse.restore": "استعادة خيل",
         "request.create": "طلب تسجيل جديد",

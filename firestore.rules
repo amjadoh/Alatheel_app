@@ -43,8 +43,12 @@ service cloud.firestore {
       return exists(path) ? get(path).data.role : 'none';
     }
 
+    function ownerRecordId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerRecordId', request.auth.uid);
+    }
+
     function isHorseOwner(horseData) {
-      return (isOwner() || isViewer()) && horseData.ownerId == request.auth.uid;
+      return (isOwner() || isViewer()) && horseData.ownerId == ownerRecordId();
     }
 
     function isValidId(id) {
@@ -126,9 +130,13 @@ service cloud.firestore {
     }
 
     // 1. Horses Collection
+    match /owners/{ownerId} {
+      allow read: if isEmployee();
+      allow write: if false; // Business records and account links are managed on the server.
+    }
     match /horses/{horseId} {
       allow get: if isEmployee() || isHorseOwner(existing());
-      allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
       allow create: if isEmployee() && isValidHorse(incoming());
       allow update: if isEmployee() && isValidHorse(incoming());
       allow delete: if isAdmin();
@@ -181,32 +189,32 @@ service cloud.firestore {
 
     // 9. Activities Collection
     match /activities/{activityId} {
-      allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
-      allow get: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
+      allow get: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
       allow create: if isSignedIn();
     }
 
     // 10. Incomes Collection
     match /incomes/{incomeId} {
-      allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
       allow create: if isEmployee() && isValidIncome(incoming());
       allow update: if isEmployee() && isValidIncome(incoming());
       allow delete: if isAdmin();
     }
 
     match /income/{incomeId} {
-      allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
       allow write: if false;
     }
     match /memberInvitations/{invitationId} { allow read, write: if false; }
     // 11. Registration Requests
     match /registrationRequests/{requestId} {
-      allow list: if isEmployee() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
-      allow get: if isEmployee() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
-      allow create: if isSignedIn() && isValidRegistrationRequest(incoming()) && incoming().ownerId == request.auth.uid;
+      allow list: if isEmployee() || (isSignedIn() && resource.data.ownerId == ownerRecordId());
+      allow get: if isEmployee() || (isSignedIn() && resource.data.ownerId == ownerRecordId());
+      allow create: if isSignedIn() && isValidRegistrationRequest(incoming()) && incoming().ownerId == ownerRecordId();
       allow update: if isSignedIn() && (
         (isEmployee() && isValidRegistrationRequest(incoming())) ||
-        (resource.data.ownerId == request.auth.uid && incoming().status in ['approved', 'rejected'] && existing().status == 'awaiting_owner_approval' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        (resource.data.ownerId == ownerRecordId() && incoming().status in ['approved', 'rejected'] && existing().status == 'awaiting_owner_approval' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
       );
       allow delete: if isAdmin();
     }
