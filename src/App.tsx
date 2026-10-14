@@ -820,7 +820,7 @@ export default function App() {
                   </button>
                   <button
                     className="stat"
-                    onClick={() => go(isStaff ? "members" : "income")}
+                    onClick={() => go(isStaff ? "owners" : "income")}
                   >
                     <Users />
                     <span>{isStaff ? "الملاك" : "رسوم الإيواء الشهرية"}</span>
@@ -1767,7 +1767,7 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.1.0 · أندرويد
+                  الأثيل · الإصدار 1.2.0 · أندرويد
                 </p>
               </>
             )}
