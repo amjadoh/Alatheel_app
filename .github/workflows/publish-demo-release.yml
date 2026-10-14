@@ -32,7 +32,7 @@ jobs:
           echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
           gh run download "$BUILD_RUN" --name Alatheel-Android-Google --dir artifact
           test -s artifact/app-release.apk
-          grep -Fq '87:92:04:AD:6A:7D:C3:E2:95:FA:D0:7B:FB:A3:44:B7:85:8A:70:C5' artifact/signing-certificate.txt
+          grep -Fq '2F:50:8F:35:D3:89:AF:02:60:D7:D2:16:FB:75:0E:2E:49:EC:AE:B4:E4:FF:E5:A9:F9:28:B1:F7:A7:D6:F8:3F' artifact/signing-certificate.txt
           mv artifact/app-release.apk artifact/Alatheel-1.2.0.apk
           (cd artifact && sha256sum Alatheel-1.2.0.apk > SHA256SUMS.txt)
       - name: Publish GitHub release
