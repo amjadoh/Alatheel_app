@@ -5,7 +5,8 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { createTransport } from "nodemailer";
-import { invitationMessage } from "./invitations";
+import { invitationMessage, invitationFailureCode } from "./invitations";
+import { error as logError } from "firebase-functions/logger";
 import { assertOwnerLink, invitationRequested } from "./owners";
 import { storageCollection, normalizeRecord } from "./records";
 import {
@@ -514,6 +515,8 @@ export const sendMemberInvitation = invitationsEnabled
         });
         if (!invitation) return;
         let status = "failed";
+        let stage: "download" | "smtp" = "download";
+        let failureCode = "";
         try {
           const downloadUrl =
             process.env.APP_DOWNLOAD_URL ||
@@ -524,6 +527,7 @@ export const sendMemberInvitation = invitationsEnabled
           });
           if (!download.ok)
             throw new Error("Latest APK download is unavailable");
+          stage = "smtp";
           const transport = createTransport({
             host: process.env.INVITATION_SMTP_HOST || "smtp.gmail.com",
             port: 465,
@@ -548,13 +552,21 @@ export const sendMemberInvitation = invitationsEnabled
             ),
           });
           status = "sent";
-        } catch {
-          // Keep private transport errors and credentials out of member-visible records.
+        } catch (e) {
+          failureCode = invitationFailureCode(e, stage);
+          logError("Invitation delivery failed", {
+            invitationId: ref.id,
+            failureCode,
+          });
         }
         await db.runTransaction(async (tx) => {
           const memberRef = db.doc(`users/${invitation.userId}`),
             member = await tx.get(memberRef);
-          tx.update(ref, { status, finishedAt: new Date().toISOString() });
+          tx.update(ref, {
+            status,
+            failureCode,
+            finishedAt: new Date().toISOString(),
+          });
           if (member.data()?.invitationId === ref.id)
             tx.update(memberRef, {
               invitationStatus: status,

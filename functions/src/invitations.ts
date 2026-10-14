@@ -1,3 +1,27 @@
+/** Only fixed diagnostic categories leave the SMTP boundary; never log response text or credentials. */
+export function invitationFailureCode(
+  error: unknown,
+  stage: "download" | "smtp",
+) {
+  if (stage === "download") return "download_unavailable";
+  const code = (error as { code?: string } | null)?.code;
+  if (code === "EAUTH") return "mail_authentication";
+  if (
+    [
+      "ETIMEDOUT",
+      "ESOCKET",
+      "ECONNECTION",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "EDNS",
+      "EHOSTUNREACH",
+    ].includes(code || "")
+  )
+    return "mail_connection";
+  if (code === "EENVELOPE") return "mail_address";
+  return "mail_delivery";
+}
+
 export function invitationMessage(
   name: string,
   email: string,
