@@ -1,7 +1,12 @@
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { defineSecret } from "firebase-functions/params";
+import { createTransport } from "nodemailer";
+import { invitationMessage } from "./invitations";
+import { storageCollection, normalizeRecord } from "./records";
 import {
   applyCommand,
   emptyState,
@@ -11,9 +16,19 @@ import {
   Collection,
   ensure,
 } from "./domain";
+import {
+  requireGoogle,
+  resolveAccess,
+  normalizeEmail,
+  PRIMARY_ADMIN_EMAIL,
+} from "./access";
 initializeApp();
-const db = getFirestore(process.env.FIRESTORE_DATABASE_ID || "(default)");
+const databaseId =
+  process.env.FIRESTORE_DATABASE_ID ||
+  "ai-studio-3316cd3a-14d1-4f71-adec-897324c5bb0e";
+const db = getFirestore(databaseId);
 const auth = getAuth();
+const invitationsEnabled = process.env.INVITATIONS_ENABLED === "true";
 const options = {
   region: process.env.FUNCTIONS_REGION || "us-central1",
   maxInstances: 5,
@@ -34,34 +49,68 @@ const needs: Record<string, Collection[]> = {
   "profile.save": ["users"],
   "settings.save": ["settings"],
 };
-export const ensureProfile = onCall(options, async (request) => {
+async function verifiedGoogle(request: { auth?: { uid: string; token: any } }) {
   if (!request.auth)
-    throw new HttpsError("unauthenticated", "سجل الدخول أولًا");
+    throw new HttpsError("unauthenticated", "سجل الدخول بحساب Google أولًا");
   const u = await auth.getUser(request.auth.uid);
-  if (u.disabled) throw new HttpsError("permission-denied", "الحساب معطل");
-  await db.runTransaction(async (tx) => {
-    const ref = db.doc(`users/${u.uid}`),
-      snap = await tx.get(ref);
-    if (snap.exists) {
-      if (snap.data()?.disabled)
-        throw new HttpsError("permission-denied", "الحساب معطل");
-      return;
-    }
-    tx.create(ref, {
-      uid: u.uid,
-      displayName: u.displayName || "عضو جديد",
-      email: u.email || "",
-      phoneNumber: u.phoneNumber || "",
-      role: "viewer",
-      disabled: false,
-      createdAt: new Date().toISOString(),
+  const identity = {
+    email: u.email,
+    emailVerified:
+      u.emailVerified && request.auth.token.email_verified === true,
+    signInProvider: request.auth.token.firebase?.sign_in_provider,
+    disabled: u.disabled,
+  };
+  try {
+    requireGoogle(identity);
+  } catch (e) {
+    throw new HttpsError(
+      "permission-denied",
+      e instanceof Error ? e.message : "الدخول غير مسموح",
+    );
+  }
+  return { u, identity };
+}
+export const ensureProfile = onCall(options, async (request) => {
+  const { u, identity } = await verifiedGoogle(request);
+  try {
+    await db.runTransaction(async (tx) => {
+      const ref = db.doc(`users/${u.uid}`),
+        snap = await tx.get(ref);
+      const role = resolveAccess(
+        identity,
+        snap.exists ? snap.data() : undefined,
+      );
+      if (!snap.exists) {
+        tx.create(ref, {
+          uid: u.uid,
+          displayName: u.displayName || "مدير الإسطبل",
+          email: u.email,
+          phoneNumber: u.phoneNumber || "",
+          role,
+          disabled: false,
+          membershipApproved: true,
+          createdAt: new Date().toISOString(),
+        });
+      } else if (
+        snap.data()?.role !== role ||
+        snap.data()?.disabled === undefined ||
+        (role === "admin" &&
+          identity.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL &&
+          !snap.data()?.membershipApproved)
+      ) {
+        tx.update(ref, { role, disabled: false, membershipApproved: true });
+      }
     });
-  });
+  } catch (e) {
+    throw new HttpsError(
+      "permission-denied",
+      e instanceof Error ? e.message : "الدخول غير مسموح",
+    );
+  }
   return { ok: true };
 });
 export const operate = onCall(options, async (request) => {
-  if (!request.auth)
-    throw new HttpsError("unauthenticated", "سجل الدخول أولًا");
+  const { identity } = await verifiedGoogle(request);
   const c = request.data as Command;
   if (
     !c ||
@@ -72,7 +121,8 @@ export const operate = onCall(options, async (request) => {
   try {
     return await db.runTransaction(async (tx) => {
       const p = await tx.get(db.doc(`users/${request.auth!.uid}`));
-      ensure(p.exists && !p.data()?.disabled, "الحساب غير متاح");
+      resolveAccess(identity, p.exists ? p.data() : undefined);
+      ensure(p.exists, "الحساب غير متاح");
       const actor = { ...p.data(), uid: p.id } as Actor;
       const receipt = await tx.get(db.doc(`activities/${c.requestId}`));
       if (receipt.exists) {
@@ -80,30 +130,41 @@ export const operate = onCall(options, async (request) => {
         return { ok: true };
       }
       const state = emptyState();
-      state.users = [{ id: p.id, ...p.data() }];
+      state.users = [normalizeRecord("users",p.id,p.data()!)];
       // Read only collections required by the operation, inside the same transaction.
       for (const name of needs[c.action]) {
-        const snapshot = await tx.get(db.collection(name).limit(4001));
+        const snapshot = await tx.get(
+          db.collection(storageCollection(name)).limit(4001),
+        );
         ensure(
           snapshot.size <= 4000,
           "حجم السجلات يتجاوز حد التشغيل الحالي؛ يلزم ترقية الاستعلامات قبل المتابعة",
         );
-        state[name] = snapshot.docs.map((doc) => ({
-          ...doc.data(),
-          id: doc.id,
-        }));
+        state[name] = snapshot.docs.map((doc) =>
+          normalizeRecord(name, doc.id, doc.data()),
+        );
       }
+      if(c.action === "income.collect") ensure(!state.expenses.some(e => e.frequency === "once" && e.horseIds?.includes(c.id) && !e.allocations),
+        "توجد مصروفات قديمة تحتاج اعتماد توزيعها من المدير قبل التحصيل");
       const next = applyCommand(state, actor, c);
       for (const name of collections) {
         const before = new Map(state[name].map((r) => [r.id, r]));
         for (const row of next[name]) {
           if (JSON.stringify(before.get(row.id)) !== JSON.stringify(row)) {
             const { id, ...value } = row;
-            tx.set(db.doc(`${name}/${id}`), value);
+            for (const key of ["createdAt", "updatedAt", "collectedAt"])
+              if (typeof value[key] === "string")
+                value[key] = Timestamp.fromDate(new Date(value[key]));
+            if (name === "income") {
+              value.dueDate = Timestamp.fromDate(new Date(value.dueDate));
+              value.status = "collected";
+            }
+            tx.set(db.doc(`${storageCollection(name)}/${id}`), value);
           }
           before.delete(row.id);
         }
-        for (const id of before.keys()) tx.delete(db.doc(`${name}/${id}`));
+        for (const id of before.keys())
+          tx.delete(db.doc(`${storageCollection(name)}/${id}`));
       }
       return { ok: true };
     });
@@ -116,12 +177,12 @@ export const operate = onCall(options, async (request) => {
   }
 });
 export const manageMember = onCall(options, async (request) => {
-  if (!request.auth)
-    throw new HttpsError("unauthenticated", "سجل الدخول أولًا");
-  const caller = request.auth.uid,
+  const { identity } = await verifiedGoogle(request);
+  const caller = request.auth!.uid,
     { action, data = {}, id } = request.data ?? {};
   const assertAdmin = async () => {
     const p = await db.doc(`users/${caller}`).get();
+    resolveAccess(identity, p.exists ? p.data() : undefined);
     ensure(
       p.data()?.role === "admin" && !p.data()?.disabled,
       "إدارة الأعضاء للمدير فقط",
@@ -130,13 +191,15 @@ export const manageMember = onCall(options, async (request) => {
   try {
     await assertAdmin();
     ensure(
-      ["create", "update", "disable", "enable", "delete"].includes(action),
+      ["create", "update", "disable", "enable", "delete", "invite"].includes(
+        action,
+      ),
       "عملية غير معروفة",
     );
     if (action === "create") {
       ensure(
-        ["owner", "employee"].includes(data.role),
-        "أنشئ مالكًا أو موظفًا ثم عدل الصلاحية عند الحاجة",
+        ["admin", "owner", "employee", "viewer"].includes(data.role),
+        "حدد صلاحية العضو",
       );
       ensure(
         typeof data.email === "string" &&
@@ -149,42 +212,60 @@ export const manageMember = onCall(options, async (request) => {
       );
       let u;
       try {
-        u = await auth.getUserByEmail(data.email.trim());
+        u = await auth.getUserByEmail(normalizeEmail(data.email));
       } catch (e: any) {
         if (e.code !== "auth/user-not-found") throw e;
         u = await auth.createUser({
-          email: data.email.trim(),
+          email: normalizeEmail(data.email),
           displayName: data.displayName.trim(),
           emailVerified: false,
         });
       }
       await db.runTransaction(async (tx) => {
         const p = await tx.get(db.doc(`users/${caller}`));
+        resolveAccess(identity, p.exists ? p.data() : undefined);
         ensure(
           p.data()?.role === "admin" && !p.data()?.disabled,
           "لا تملك الصلاحية",
         );
         const ref = db.doc(`users/${u.uid}`),
           old = await tx.get(ref);
-        ensure(!old.exists, "العضو مسجل بالفعل؛ استخدم تعديل العضو");
-        tx.create(ref, {
+        ensure(
+          !old.exists ||
+            (!old.data()?.membershipApproved &&
+              !old.data()?.disabled &&
+              !old.data()?.deleted),
+          "العضو مسجل بالفعل؛ استخدم تعديل العضو",
+        );
+        const inviteRef = db.collection("memberInvitations").doc();
+        tx.set(ref, {
           uid: u.uid,
           email: u.email,
           displayName: data.displayName.trim().slice(0, 100),
           phoneNumber: data.phoneNumber.trim().slice(0, 30),
           role: data.role,
           disabled: false,
+          membershipApproved: true,
+          approvedBy: caller,
+          invitationStatus: invitationsEnabled ? "queued" : "setup_required",
+          invitationId: inviteRef.id,
+          createdAt: new Date().toISOString(),
+        });
+        tx.create(inviteRef, {
+          userId: u.uid,
+          email: u.email,
+          displayName: data.displayName.trim(),
+          status: invitationsEnabled ? "queued" : "setup_required",
+          createdBy: caller,
           createdAt: new Date().toISOString(),
         });
       });
-      await db
-        .collection("activities")
-        .add({
-          action: "member.create",
-          performedBy: caller,
-          ownerId: u.uid,
-          createdAt: new Date().toISOString(),
-        });
+      await db.collection("activities").add({
+        action: "member.create",
+        performedBy: caller,
+        ownerId: u.uid,
+        createdAt: new Date().toISOString(),
+      });
       return { ok: true, uid: u.uid };
     }
     ensure(
@@ -196,11 +277,41 @@ export const manageMember = onCall(options, async (request) => {
     await db.runTransaction(async (tx) => {
       const admin = await tx.get(db.doc(`users/${caller}`)),
         target = await tx.get(ref);
+      resolveAccess(identity, admin.exists ? admin.data() : undefined);
       ensure(
         admin.data()?.role === "admin" && !admin.data()?.disabled,
         "لا تملك الصلاحية",
       );
-      ensure(target.exists, "العضو غير موجود");
+      ensure(target.exists && !target.data()?.deleted, "العضو غير موجود");
+      if (action === "invite") {
+        ensure(
+          invitationsEnabled,
+          "إرسال الدعوات لم يُفعّل بعد؛ يلزم ربط بريد الإسطبل",
+        );
+        ensure(
+          !target.data()?.disabled &&
+            target.data()?.membershipApproved === true,
+          "اعتمد العضو وفعّله قبل إرسال الدعوة",
+        );
+        const inviteRef = db.collection("memberInvitations").doc();
+        tx.update(ref, {
+          invitationStatus: "queued",
+          invitationId: inviteRef.id,
+        });
+        tx.create(inviteRef, {
+          userId: id,
+          email: target.data()?.email,
+          displayName: target.data()?.displayName,
+          status: "queued",
+          createdBy: caller,
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
+      ensure(
+        normalizeEmail(target.data()?.email || "") !== PRIMARY_ADMIN_EMAIL,
+        "لا يمكن تغيير صلاحية المدير الأساسي أو تعطيل وحذف حسابه",
+      );
       if (action === "delete") {
         const horses = await tx.get(
           db.collection("horses").where("ownerId", "==", id),
@@ -221,6 +332,9 @@ export const manageMember = onCall(options, async (request) => {
         );
         tx.update(ref, {
           role: data.role,
+          membershipApproved: true,
+          approvedBy: caller,
+          disabled: target.data()?.disabled === true,
           displayName: data.displayName.trim().slice(0, 100),
           phoneNumber: data.phoneNumber.trim().slice(0, 30),
         });
@@ -246,14 +360,12 @@ export const manageMember = onCall(options, async (request) => {
         authSyncPending: false,
       });
     }
-    await db
-      .collection("activities")
-      .add({
-        action: "member." + action,
-        performedBy: caller,
-        ownerId: id,
-        createdAt: new Date().toISOString(),
-      });
+    await db.collection("activities").add({
+      action: "member." + action,
+      performedBy: caller,
+      ownerId: id,
+      createdAt: new Date().toISOString(),
+    });
     return { ok: true };
   } catch (e) {
     throw new HttpsError(
@@ -262,3 +374,90 @@ export const manageMember = onCall(options, async (request) => {
     );
   }
 });
+const smtpPassword = invitationsEnabled
+  ? defineSecret("MEMBER_INVITATION_SMTP_PASSWORD")
+  : null;
+export const sendMemberInvitation = invitationsEnabled
+  ? onDocumentCreated(
+      {
+        ...options,
+        database: databaseId,
+        document: "memberInvitations/{invitationId}",
+        secrets: [smtpPassword!],
+        retry: false,
+      },
+      async (event) => {
+        const ref = event.data?.ref;
+        if (!ref) return;
+        const invitation = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (snap.data()?.status !== "queued") return null;
+          const data = snap.data()!;
+          const memberRef = db.doc(`users/${data.userId}`),
+            member = await tx.get(memberRef);
+          if (
+            !member.exists ||
+            member.data()?.disabled ||
+            member.data()?.deleted ||
+            member.data()?.membershipApproved !== true ||
+            member.data()?.invitationId !== ref.id
+          ) {
+            tx.update(ref, { status: "cancelled" });
+            return null;
+          }
+          tx.update(ref, { status: "sending" });
+          tx.update(memberRef, { invitationStatus: "sending" });
+          return data;
+        });
+        if (!invitation) return;
+        let status = "failed";
+        try {
+          const downloadUrl =
+            process.env.APP_DOWNLOAD_URL ||
+            "https://alatheel-app-426403695200.web.app/downloads/Alatheel-latest.apk";
+          const download = await fetch(downloadUrl, {
+            method: "HEAD",
+            signal: AbortSignal.timeout(10000),
+          });
+          if (!download.ok)
+            throw new Error("Latest APK download is unavailable");
+          const transport = createTransport({
+            host: process.env.INVITATION_SMTP_HOST || "smtp.gmail.com",
+            port: 465,
+            secure: true,
+            connectionTimeout: 15000,
+            greetingTimeout: 15000,
+            socketTimeout: 20000,
+            auth: {
+              user: process.env.INVITATION_MAIL_USER || "amjadoh@gmail.com",
+              pass: smtpPassword!.value().replace(/\s/g, ""),
+            },
+          });
+          await transport.sendMail({
+            from:
+              process.env.INVITATION_FROM || "إسطبل الأثيل <amjadoh@gmail.com>",
+            to: invitation.email,
+            messageId: `<alatheel-invite-${ref.id}@gen-lang-client-0145196991.firebaseapp.com>`,
+            ...invitationMessage(
+              invitation.displayName,
+              invitation.email,
+              downloadUrl,
+            ),
+          });
+          status = "sent";
+        } catch {
+          // Keep private transport errors and credentials out of member-visible records.
+        }
+        await db.runTransaction(async (tx) => {
+          const memberRef = db.doc(`users/${invitation.userId}`),
+            member = await tx.get(memberRef);
+          tx.update(ref, { status, finishedAt: new Date().toISOString() });
+          if (member.data()?.invitationId === ref.id)
+            tx.update(memberRef, {
+              invitationStatus: status,
+              invitationUpdatedAt: new Date().toISOString(),
+            });
+        });
+      },
+    )
+  : undefined;

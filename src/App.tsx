@@ -24,12 +24,10 @@ import { App as NativeApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import {
   connect,
-  demo,
   login,
   logout,
   execute,
   member,
-  resetDemo,
   errorText,
   Actor,
   State,
@@ -412,16 +410,11 @@ export default function App() {
         {
           name: "role",
           label: "الصلاحية",
-          options: (u
-            ? Object.entries(roles)
-            : [
-                ["owner", "مالك خيل"],
-                ["employee", "موظف التشغيل"],
-              ]) as [string, string][],
+          options: Object.entries(roles) as [string, string][],
         },
       ],
       values: u || { role: "owner" },
-      note: "يدخل العضو بحساب Google المطابق للبريد. ترقية عضو إلى مدير متاحة من تعديل العضو.",
+      note: "يدخل العضو بحساب Google المطابق للبريد، ويستقبل دعوة برابط أحدث نسخة عند تفعيل خدمة البريد. يمكنك تعيين مدير ثانٍ من الصلاحية.",
       submit: (d) => member(u ? "update" : "create", u?.id, d),
     });
   const horseDetail = (h: Row) => {
@@ -651,25 +644,9 @@ export default function App() {
   );
   return (
     <div className="app" dir="rtl">
-      {demo && (
-        <div className="demo-banner">
-          نسخة تجربة محلية · البيانات محفوظة على هذا الجهاز{" "}
-          <button
-            onClick={() => {
-              logout();
-              setLoginOpen(true);
-            }}
-          >
-            تبديل الحساب
-          </button>
-        </div>
-      )}
       {!online && (
         <div className="offline" role="status">
-          لا يوجد اتصال.{" "}
-          {demo
-            ? "التجربة المحلية متاحة."
-            : "تتطلب العمليات اتصالًا؛ أعد المحاولة بعد عودته."}
+          لا يوجد اتصال. تتطلب العمليات اتصالًا؛ أعد المحاولة بعد عودته.
         </div>
       )}
       <header>
@@ -732,13 +709,13 @@ export default function App() {
                 ))}
               </div>
               <Button kind="gold" onClick={() => setLoginOpen(true)}>
-                التسجيل ودخول الأعضاء <ArrowUpLeft size={20} />
+                دخول الأعضاء باستخدام Google <ArrowUpLeft size={20} />
               </Button>
               <Button kind="outline" onClick={() => setLoginOpen(true)}>
                 طلب تسجيل خيل
               </Button>
               <p className="muted small">
-                بعد التسجيل تظهر لوحة معلومات حسابك، ومنها تقدم طلب الخيل وتتابع
+                بعد الدخول تظهر لوحة معلومات حسابك، ومنها تقدم طلب الخيل وتتابع
                 اعتماد الإدارة.
               </p>
             </section>
@@ -1404,45 +1381,92 @@ export default function App() {
                     </div>
                     <p className="muted ltr">{u.email}</p>
                     <p className="muted">{u.phoneNumber}</p>
-                    {isAdmin && u.id !== a.uid && (
-                      <>
-                        <div className="actions">
-                          <Button kind="outline" onClick={() => memberForm(u)}>
-                            تعديل الصلاحية
-                          </Button>
-                          <Button
-                            kind="outline"
+                    {u.email?.toLowerCase() === "amjadoh@gmail.com" ? (
+                      <p className="muted">المدير الأساسي</p>
+                    ) : (
+                      !u.membershipApproved && (
+                        <p className="notice">
+                          العضوية تحتاج اعتماد المدير قبل السماح بالدخول.
+                        </p>
+                      )
+                    )}
+                    {u.invitationStatus && (
+                      <p className="muted">
+                        الدعوة:{" "}
+                        {(
+                          {
+                            queued: "بانتظار الإرسال",
+                            setup_required: "إرسال الدعوات لم يُفعّل بعد",
+                            sending: "جارٍ الإرسال",
+                            sent: "أُرسلت",
+                            failed:
+                              "تعذر الإرسال؛ أعد المحاولة بعد التحقق من خدمة البريد",
+                          } as Record<string, string>
+                        )[u.invitationStatus] || u.invitationStatus}
+                      </p>
+                    )}
+                    {isAdmin &&
+                      u.id !== a.uid &&
+                      u.email?.toLowerCase() !== "amjadoh@gmail.com" && (
+                        <>
+                          <div className="actions">
+                            <Button
+                              kind="outline"
+                              onClick={() => memberForm(u)}
+                            >
+                              {u.membershipApproved
+                                ? "تعديل الصلاحية"
+                                : "اعتماد العضوية والصلاحية"}
+                            </Button>
+                            {u.membershipApproved && !u.disabled && (
+                              <Button
+                                kind="outline"
+                                disabled={
+                                  busy ||
+                                  ["queued", "sending"].includes(
+                                    u.invitationStatus,
+                                  )
+                                }
+                                onClick={() =>
+                                  void run(() => member("invite", u.id))
+                                }
+                              >
+                                إعادة إرسال الدعوة
+                              </Button>
+                            )}
+                            <Button
+                              kind="outline"
+                              onClick={() =>
+                                confirm(
+                                  u.disabled ? "تفعيل العضو" : "تعطيل العضو",
+                                  u.disabled
+                                    ? "سيتمكن العضو من الدخول مجددًا."
+                                    : "سيمنع العضو من استخدام الحساب حتى إعادة تفعيله.",
+                                  () =>
+                                    member(
+                                      u.disabled ? "enable" : "disable",
+                                      u.id,
+                                    ),
+                                )
+                              }
+                            >
+                              {u.disabled ? "تفعيل" : "تعطيل"}
+                            </Button>
+                          </div>
+                          <button
+                            className="danger-text"
                             onClick={() =>
                               confirm(
-                                u.disabled ? "تفعيل العضو" : "تعطيل العضو",
-                                u.disabled
-                                  ? "سيتمكن العضو من الدخول مجددًا."
-                                  : "سيمنع العضو من استخدام الحساب حتى إعادة تفعيله.",
-                                () =>
-                                  member(
-                                    u.disabled ? "enable" : "disable",
-                                    u.id,
-                                  ),
+                                "حذف العضو",
+                                "يحذف حساب الدخول ويُحفظ أثره في السجلات المالية. لا يسمح بالحذف عند وجود خيل نشطة مرتبطة به.",
+                                () => member("delete", u.id),
                               )
                             }
                           >
-                            {u.disabled ? "تفعيل" : "تعطيل"}
-                          </Button>
-                        </div>
-                        <button
-                          className="danger-text"
-                          onClick={() =>
-                            confirm(
-                              "حذف العضو",
-                              "يحذف حساب الدخول ويُحفظ أثره في السجلات المالية. لا يسمح بالحذف عند وجود خيل نشطة مرتبطة به.",
-                              () => member("delete", u.id),
-                            )
-                          }
-                        >
-                          حذف العضو
-                        </button>
-                      </>
-                    )}
+                            حذف العضو
+                          </button>
+                        </>
+                      )}
                   </section>
                 ))}
               </>
@@ -1558,22 +1582,8 @@ export default function App() {
                   <LogOut size={18} />
                   تسجيل الخروج
                 </Button>
-                {demo && (
-                  <Button
-                    kind="outline"
-                    onClick={() =>
-                      confirm(
-                        "إعادة بيانات التجربة",
-                        "ستحذف التغييرات المحلية وتعود بيانات التجربة إلى البداية.",
-                        async () => resetDemo(),
-                      )
-                    }
-                  >
-                    إعادة بيانات التجربة
-                  </Button>
-                )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.0.0 · أندرويد
+                  الأثيل · الإصدار 1.1.0 · أندرويد
                 </p>
               </>
             )}
@@ -1620,29 +1630,18 @@ export default function App() {
         <Modal title="أهلًا بك في الأثيل" close={() => setLoginOpen(false)}>
           <img className="login-logo" src="/logo.jpeg" alt="شعار الأثيل" />
           <p>سجل دخولك للوصول إلى لوحة المعلومات وطلبات الخيل.</p>
-          {demo ? (
-            <>
-              <div className="notice">
-                حسابات للتجربة فقط؛ البيانات محلية على هذا الجهاز.
-              </div>
-              {Object.entries(roles).map(([r, label]) => (
-                <Button
-                  key={r}
-                  kind={r === "admin" ? "gold" : "outline"}
-                  onClick={() => void run(() => login(r))}
-                >
-                  {label}
-                </Button>
-              ))}
-            </>
-          ) : (
-            <Button kind="gold" onClick={() => void run(() => login())}>
-              التسجيل أو الدخول باستخدام Google
-            </Button>
-          )}
+          <Button kind="gold" disabled={busy} onClick={() => void run(login)}>
+            تسجيل الدخول باستخدام Google
+          </Button>
           <p className="muted small">
-            الحساب الجديد يبدأ كعضو. صلاحيات الإدارة يمنحها مدير الإسطبل.
+            الدخول متاح للإيميلات التي يضيفها مدير الإسطبل فقط. اختر حساب Google
+            المطابق لبريد العضوية.
           </p>
+          {error && (
+            <p className="notice" role="alert">
+              {error}
+            </p>
+          )}
         </Modal>
       )}
       {form && (

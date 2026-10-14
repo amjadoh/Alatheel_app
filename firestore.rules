@@ -1,21 +1,214 @@
 rules_version = '2';
 service cloud.firestore {
- match /databases/{database}/documents {
-  function signed(){return request.auth != null;}
-  function active(){return signed() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.disabled == false;}
-  function role(){return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;}
-  function staff(){return active() && role() in ['admin','employee'];}
-  function mine(){return active() && resource.data.ownerId == request.auth.uid;}
-  match /settings/{id}{allow read: if true;}
-  match /users/{id}{allow read: if active() && (staff() || id == request.auth.uid);}
-  match /horses/{id}{allow read: if staff() || mine();}
-  match /registrationRequests/{id}{allow read: if staff() || mine();}
-  match /income/{id}{allow read: if staff() || mine();}
-  match /activities/{id}{allow read: if staff() || mine();}
-  match /mealTypes/{id}{allow read: if staff();}
-  match /inventoryTransactions/{id}{allow read: if staff();}
-  match /expenses/{id}{allow read: if staff();}
-  // All writes go through authenticated Cloud Functions and atomic transactions.
-  match /{document=**}{allow write: if false;}
- }
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email_verified == true
+        && exists(path)
+        && get(path).data.membershipApproved == true
+        && get(path).data.disabled == false
+        && get(path).data.email.lower() == request.auth.token.email.lower();
+    }
+
+    function isEmailVerified() {
+      return isSignedIn();
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUserRole() == 'admin';
+    }
+
+    function isEmployee() {
+      return isSignedIn() && getUserRole() in ['admin', 'employee'];
+    }
+
+    function isOwner() {
+      return isSignedIn() && getUserRole() == 'owner';
+    }
+
+    function isViewer() {
+      return isSignedIn() && getUserRole() == 'viewer';
+    }
+
+    function getUserRole() {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data.role : 'none';
+    }
+
+    function isHorseOwner(horseData) {
+      return (isOwner() || isViewer()) && horseData.ownerId == request.auth.uid;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'createdAt'])
+        && data.email is string && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() <= 100
+        && data.role in ['admin', 'employee', 'owner', 'viewer']
+        && (!('phoneNumber' in data) || data.phoneNumber is string)
+        && (data.createdAt == request.time || data.createdAt is timestamp);
+    }
+
+    function isValidHorse(data) {
+      return data.keys().hasAll(['name', 'ownerId', 'status', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() <= 100
+        && data.ownerId is string && data.ownerId.size() <= 128
+        && data.status in ['active', 'training', 'sick', 'sold', 'archived', 'boarding', 'boarding_breeding', 'private']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMealType(data) {
+      return data.keys().hasAll(['name', 'unit', 'pricePerUnit', 'currentStock', 'minThreshold'])
+        && data.name is string && data.name.size() <= 100
+        && data.unit is string && data.unit.size() <= 20
+        && data.pricePerUnit is number && data.pricePerUnit >= 0
+        && data.currentStock is number
+        && data.minThreshold is number;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['name', 'cost', 'frequency', 'createdAt'])
+        && data.name is string && data.name.size() <= 200
+        && data.cost is number && data.cost >= 0
+        && data.frequency in ['once', 'daily', 'weekly', 'monthly']
+        && data.createdAt is timestamp
+        && (!('horseIds' in data) || (data.horseIds is list && (data.horseIds.size() == 0 || data.horseIds[0] is string)));
+    }
+
+    function isValidIncome(data) {
+      return data.keys().hasAll(['horseId', 'amount', 'dueDate', 'status'])
+        && data.horseId is string && data.horseId.size() <= 128
+        && data.amount is number && data.amount >= 0
+        && data.status in ['pending', 'collected']
+        && data.dueDate is timestamp;
+    }
+
+    function isValidRegistrationRequest(data) {
+      return data.keys().hasAll(['ownerId', 'horseName', 'status', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() <= 128
+        && data.horseName is string && data.horseName.size() <= 100
+        && data.status in ['pending', 'reviewing', 'awaiting_owner_approval', 'approved', 'rejected']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. Users Collection
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isEmployee());
+      allow list: if isEmployee();
+      // Memberships and roles are managed by verified administrator Cloud Functions.
+      allow create, delete: if false;
+      allow update: if isSignedIn() && request.auth.uid == userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName','photoURL','phoneNumber']);
+    }
+
+    // 1. Horses Collection
+    match /horses/{horseId} {
+      allow get: if isEmployee() || isHorseOwner(existing());
+      allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow create: if isEmployee() && isValidHorse(incoming());
+      allow update: if isEmployee() && isValidHorse(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // 3. Meal Types & Inventory
+    match /mealTypes/{mealTypeId} {
+      allow read: if isEmployee() || isOwner() || isViewer();
+      allow write: if isEmployee() && isValidMealType(incoming()) && isValidId(mealTypeId);
+    }
+
+    // 4. Meal Configs (Subcollection or linked by ID)
+    // Here we use a different path if we want to allow easier queries
+    match /horses/{horseId}/meals/{mealId} {
+      allow read: if isEmailVerified() && (isEmployee() || isHorseOwner(get(/databases/$(database)/documents/horses/$(horseId)).data));
+      allow write: if isEmployee() && isValidId(mealId);
+    }
+
+    // 5. Feeding Logs
+    match /feedingLogs/{logId} {
+      allow read: if isEmailVerified() && (isEmployee() || isHorseOwner(get(/databases/$(database)/documents/horses/$(existing().horseId)).data));
+      allow create: if isEmployee() && isValidId(logId);
+    }
+
+    // 6. Inventory Transactions
+    match /inventoryTransactions/{txId} {
+      allow read: if isEmployee();
+      allow create: if isEmployee() && isValidId(txId);
+    }
+
+    // 7. Notifications
+    match /notifications/{notifId} {
+      allow read: if isEmailVerified() && resource.data.userId == request.auth.uid;
+      allow update: if isEmailVerified() && resource.data.userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow create: if isEmployee(); // System/Admin/Employee can notify
+    }
+
+    // 8. Expenses Collection
+    match /expenses/{expenseId} {
+      allow read: if isEmployee() || ((isOwner() || isViewer()) && request.auth.uid in resource.data.get('horseIds', []));
+      allow create: if isEmployee() && isValidExpense(incoming());
+      allow update: if isEmployee() && isValidExpense(incoming());
+      allow delete: if isAdmin();
+    }
+    // 4. Settings Collection (Stable Identity)
+    match /settings/{docId} {
+      allow read: if true; // Allow public read for logo and name on landing page
+      allow write: if isAdmin();
+    }
+
+    // 9. Activities Collection
+    match /activities/{activityId} {
+      allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow get: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow create: if isSignedIn();
+    }
+
+    // 10. Incomes Collection
+    match /incomes/{incomeId} {
+      allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow create: if isEmployee() && isValidIncome(incoming());
+      allow update: if isEmployee() && isValidIncome(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /income/{incomeId} {
+      allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == request.auth.uid);
+      allow write: if false;
+    }
+    match /memberInvitations/{invitationId} { allow read, write: if false; }
+    // 11. Registration Requests
+    match /registrationRequests/{requestId} {
+      allow list: if isEmployee() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow get: if isEmployee() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isSignedIn() && isValidRegistrationRequest(incoming()) && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (isEmployee() && isValidRegistrationRequest(incoming())) ||
+        (resource.data.ownerId == request.auth.uid && incoming().status in ['approved', 'rejected'] && existing().status == 'awaiting_owner_approval' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+      );
+      allow delete: if isAdmin();
+    }
+  }
 }

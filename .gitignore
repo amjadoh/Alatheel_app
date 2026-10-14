@@ -13,6 +13,9 @@ ios/App/Pods/
 ios/**/DerivedData/
 *.keystore
 *.jks
+*.p12
 google-services.json
 GoogleService-Info.plist
 service-account*.json
+
+downloads-hosting/
