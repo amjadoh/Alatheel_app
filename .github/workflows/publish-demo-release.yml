@@ -1,0 +1,35 @@
+name: Publish verified Android demo release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: b521ae80fb8daf2f391d88ed7b191e472d7f1a32
+      BUILD_RUN: '38531600889'
+      RELEASE_TAG: v1.0.0-demo
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify source and successful build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq '.head_sha')" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq '.conclusion')" = success
+          gh run download "$BUILD_RUN" --name Alatheel-Android-demo --dir artifact
+          mv artifact/app-debug.apk artifact/Alatheel-Android-demo.apk
+          echo 'fc3977e07f0b0d2dae2d53a6dbc178018515ce028d9a01a6633055dfc72fbb93  artifact/Alatheel-Android-demo.apk' | sha256sum --check
+      - name: Publish pre-release with verified APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" artifact/Alatheel-Android-demo.apk \
+            --target "$SOURCE_SHA" --prerelease \
+            --title 'الأثيل — Android v1.0.0-demo' \
+            --notes-file docs/release-v1.0.0-demo.md
