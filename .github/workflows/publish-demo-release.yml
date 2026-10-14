@@ -39,6 +39,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" artifact/Alatheel-1.2.0.apk artifact/SHA256SUMS.txt \
-            --target "$SOURCE_SHA" --title 'الأثيل — Android 1.2.0 · إدارة الملاك' \
-            --notes-file docs/release-v1.2.0.md
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" = "$SOURCE_SHA"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifact/Alatheel-1.2.0.apk artifact/SHA256SUMS.txt
+          else
+            gh release create "$RELEASE_TAG" artifact/Alatheel-1.2.0.apk artifact/SHA256SUMS.txt \
+              --verify-tag --title 'الأثيل — Android 1.2.0 · إدارة الملاك' \
+              --notes-file docs/release-v1.2.0.md
+          fi
