@@ -1503,7 +1503,7 @@ export default function App() {
                       </div>
                       {horses.map((h) => (
                         <button
-                          className="menu-link"
+                          className="list-link"
                           key={h.id}
                           onClick={() => horseDetail(h)}
                         >
