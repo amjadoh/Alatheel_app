@@ -42,8 +42,9 @@ if (
   const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   if (version !== pkg.version) throw new Error("Version mismatch");
   const bytes = await readFile(apk);
-  const notes =
-    "تحديث إلزامي: تنزيل وتثبيت التحديثات من داخل التطبيق، مع الحفاظ على بياناتك وحسابك.";
+  const notes = (
+    await readFile(resolve(root, "docs/update-notes.txt"), "utf8")
+  ).trim();
   const manifest = updateManifest(bytes, version, code, notes);
   const hosting = resolve(root, "downloads-hosting");
   await mkdir(resolve(hosting, "downloads"), { recursive: true });

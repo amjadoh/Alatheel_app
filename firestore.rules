@@ -178,10 +178,18 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if isEmployee() || ((isOwner() || isViewer()) && request.auth.uid in resource.data.get('horseIds', []));
       allow create: if isEmployee() && isValidExpense(incoming());
-      allow update: if isEmployee() && isValidExpense(incoming());
-      allow delete: if isAdmin();
+      allow update: if isEmployee() && isValidExpense(incoming()) && !existing().get('lockedForPayments', false);
+      allow delete: if isAdmin() && !existing().get('lockedForPayments', false);
     }
     // 4. Settings Collection (Stable Identity)
+    match /expensePayments/{paymentId} {
+      allow read: if isEmployee();
+      allow write: if false;
+    }
+    match /financialReports/{reportId} {
+      allow read: if isEmployee();
+      allow write: if false;
+    }
     match /settings/{docId} {
       allow read: if true; // Allow public read for logo and name on landing page
       allow write: if isAdmin();

@@ -3,6 +3,11 @@ import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { State } from "./service";
 import {
+  financialSummary,
+  horseFinance,
+  expensePaid,
+} from "../functions/src/finance";
+import {
   horseCost,
   feedingMeasure,
   feedingUnitPrice,
@@ -10,7 +15,11 @@ import {
   expenseIsShared,
   isFeedPurchase,
 } from "./metrics";
-export async function exportExcel(s: State, month: string) {
+export async function exportExcel(
+  s: State,
+  month: string,
+  includeFinancials = false,
+) {
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook();
   book.creator = "إسطبل الأثيل";
@@ -23,21 +32,39 @@ export async function exportExcel(s: State, month: string) {
         "الحالة",
         "التسجيل",
         "رسوم الإيواء",
-        "التغذية التقديرية",
-        "المصروفات",
-        "الإجمالي",
+        "المقبوض خلال الشهر",
+        "متبقي حتى نهاية الشهر",
+        ...(includeFinancials
+          ? [
+              "التغذية التقديرية",
+              "مصروفات التشغيل",
+              "إجمالي التكلفة",
+              "الدخل المتوقع مع المستردات",
+              "صافي التشغيل المقدّر",
+              "اكتمال التكلفة",
+            ]
+          : []),
       ],
       s.horses.map((h) => {
-        const c = horseCost(s, h, month);
+        const c = horseFinance(s, h, month);
         return [
           h.name,
           h.ownerName,
           h.status,
           h.registrationNum,
           h.boardingFee,
-          c.food,
-          c.other,
-          c.total,
+          c.cash,
+          c.outstanding,
+          ...(includeFinancials
+            ? [
+                c.food,
+                c.other,
+                c.total,
+                c.revenue,
+                c.margin,
+                c.complete ? "مكتملة" : c.missing.join("، "),
+              ]
+            : []),
         ];
       }),
     ],
@@ -97,6 +124,95 @@ export async function exportExcel(s: State, month: string) {
       ]),
     ],
   ];
+  if (includeFinancials) {
+    const f = financialSummary(s, month);
+    sheets.unshift([
+      "الملخص المالي",
+      ["البيان", "ريال", "الأساس"],
+      [
+        ["إيواء متوقع", f.expected, "شهر كامل بالرسوم الحالية"],
+        ["مستردات متوقعة من الملاك", f.recoveries, "مصروفات خاصة مستردة"],
+        ["الدخل المتوقع", f.revenue, "إيواء ومستردات"],
+        [
+          "تكلفة التشغيل المقدّرة",
+          f.total,
+          "استهلاك التغذية والتشغيل دون تكرار الشراء",
+        ],
+        [
+          "صافي التشغيل المقدّر",
+          f.operatingBalance,
+          f.incompleteCount
+            ? "مبدئي — توجد بيانات تغذية ناقصة"
+            : "تقديري بالبرنامج الحالي",
+        ],
+        ["المقبوض في الشهر", f.collected, "تاريخ التحصيل بتوقيت الرياض"],
+        ["المدفوع في الشهر", f.paid, "سداد المصروفات المسجل، باستثناء الملغى"],
+        [
+          "فرق المقبوض والمدفوع",
+          f.cashBalance,
+          "لا يشمل رصيدًا افتتاحيًا ولا يمثل رصيد البنك",
+        ],
+        [
+          "المتبقي على الملاك",
+          f.outstanding,
+          "حتى نهاية الشهر، شامل الدورات السابقة",
+        ],
+        [
+          "الالتزامات النقدية المقدّرة",
+          f.plannedPayments,
+          "تشغيل ومشتريات علف حسب التكرار",
+        ],
+        [
+          "تغطية الالتزامات المتوقعة",
+          f.fundingBalance,
+          "الدخل المتوقع ناقص الرواتب والتشغيل ومشتريات العلف حسب التكرار",
+        ],
+        ["مصدر التقرير", "", "أرقام مباشرة وقت التصدير؛ ليست النسخة المحفوظة"],
+      ],
+    ]);
+    sheets.push([
+      "سداد المصروفات",
+      [
+        "المصروف",
+        "المبلغ",
+        "تاريخ الدفع",
+        "الفترة التي يخصها",
+        "الحالة",
+        "الملاحظة",
+        "سبب الإلغاء",
+      ],
+      s.expensePayments
+        .filter(
+          (p) => p.period === month || String(p.paidAt).slice(0, 7) === month,
+        )
+        .map((p) => [
+          p.expenseName,
+          p.amount,
+          p.paidAt,
+          p.period,
+          p.status === "void" ? "ملغى" : "مدفوع",
+          p.notes || "",
+          p.voidReason || "",
+        ]),
+    ]);
+    sheets.push([
+      "سداد حسب الفترة",
+      [
+        "المصروف",
+        "التزام الفترة",
+        "سداد يخص الفترة",
+        "المتبقي",
+        "الجهة المتحملة",
+      ],
+      s.expenses.map((e) => [
+        e.name,
+        monthlyExpense(e, month),
+        expensePaid(s, e.id, month),
+        Math.max(0, monthlyExpense(e, month) - expensePaid(s, e.id, month)),
+        Object.keys(e.allocations || {}).length ? "يسترد من الملاك" : "الإسطبل",
+      ]),
+    ]);
+  }
   for (const [name, headers, rows] of sheets) {
     if (!rows.length) continue;
     const sheet = book.addWorksheet(name, {

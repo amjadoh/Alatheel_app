@@ -43,7 +43,7 @@ export function UpdateButton() {
   return (
     <section className="card update-card">
       <h3>تحديث التطبيق</h3>
-      <p className="muted small">الإصدار 1.4.0 · يجري التحقق عند فتح التطبيق</p>
+      <p className="muted small">الإصدار 1.5.0 · يجري التحقق عند فتح التطبيق</p>
       <button className="button outline" disabled={busy} onClick={check}>
         <RefreshCw size={18} /> التحقق من التحديث
       </button>

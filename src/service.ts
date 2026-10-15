@@ -162,11 +162,33 @@ export function connect(callback: typeof emit) {
 function subscribeData() {
   if (!db || !actor) return;
   const a = actor;
+  a.dataReady = false;
+  const received = new Set<string>();
+  const watched = collections.filter(
+    (c) =>
+      staff(a) ||
+      ![
+        "users",
+        "owners",
+        "mealTypes",
+        "inventoryTransactions",
+        "expenses",
+        "expensePayments",
+        "financialReports",
+      ].includes(c),
+  );
   for (const c of collections) {
     if (c === "users" && !staff(a)) continue; // Own profile is already watched by document ID.
     if (
       !["admin", "employee"].includes(a.role) &&
-      ["owners", "mealTypes", "inventoryTransactions", "expenses"].includes(c)
+      [
+        "owners",
+        "mealTypes",
+        "inventoryTransactions",
+        "expenses",
+        "expensePayments",
+        "financialReports",
+      ].includes(c)
     )
       continue;
     const ref = collection(db, storageCollection(c));
@@ -183,6 +205,8 @@ function subscribeData() {
         q,
         (snap) => {
           state[c] = snap.docs.map((d) => normalizeRecord(c, d.id, d.data()));
+          received.add(c);
+          a.dataReady = watched.every((name) => received.has(name));
           publish();
         },
         (e) => publish(errorText(e)),

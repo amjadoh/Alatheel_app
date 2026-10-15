@@ -1,6 +1,7 @@
 import { money, shares } from "./domain";
 import type { State, Row } from "./domain";
 import { feedingMeasure, feedingUnitPrice, expenseFeedMeal } from "./feeding";
+import { businessDay } from "./dates";
 
 export function isFeedPurchase(s: State, e: Row) {
   return e.expenseKind === "feed_purchase" || !!expenseFeedMeal(e, s.mealTypes);
@@ -15,8 +16,11 @@ export function monthDays(month: string) {
 export function monthlyExpense(e: Row, month: string) {
   const days = monthDays(month),
     cost = Number(e.cost || 0);
+  if (e.startMonth && e.startMonth > month) return 0;
   if (e.frequency === "once")
-    return String(e.createdAt).slice(0, 7) === month ? money(cost) : 0;
+    return businessDay(e.incurredAt || e.createdAt).slice(0, 7) === month
+      ? money(cost)
+      : 0;
   return money(
     cost *
       (e.frequency === "daily"
@@ -138,7 +142,12 @@ export function costs(s: State, month: string) {
   );
   const collected = money(
     s.income
-      .filter((i) => String(i.collectedAt).slice(0, 7) === month)
+      .filter(
+        (i) =>
+          i.status !== "pending" &&
+          i.status !== "void" &&
+          businessDay(i.collectedAt).slice(0, 7) === month,
+      )
       .reduce((sum, i) => sum + Number(i.amount || 0), 0),
   );
   const expected = money(

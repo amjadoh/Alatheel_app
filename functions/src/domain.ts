@@ -1,5 +1,8 @@
 /** Shared, deterministic rules; the server is the authority for every write. */
 import { feedingMeasure, expenseFeedMeal } from "./feeding";
+import { monthlyExpense } from "./estimates";
+import { expensePaid, financialSummary } from "./finance";
+import { businessDay } from "./dates";
 export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
@@ -10,6 +13,8 @@ export const collections = [
   "mealTypes",
   "inventoryTransactions",
   "expenses",
+  "expensePayments",
+  "financialReports",
   "income",
   "activities",
   "settings",
@@ -22,6 +27,7 @@ export type Actor = {
   displayName: string;
   disabled?: boolean;
   ownerRecordId?: string;
+  dataReady?: boolean;
 };
 export type Command = {
   action: string;
@@ -37,6 +43,8 @@ export const emptyState = (): State => ({
   mealTypes: [],
   inventoryTransactions: [],
   expenses: [],
+  expensePayments: [],
+  financialReports: [],
   income: [],
   activities: [],
   settings: [],
@@ -54,6 +62,17 @@ const required = (v: unknown, label: string) => {
   ensure(s, `أكمل ${label}`);
   return s;
 };
+function horsePhoto(value: unknown) {
+  const image = String(value || "").trim();
+  ensure(
+    image.length <= 260000 &&
+      (!image ||
+        /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image) ||
+        /^https:\/\/[^\s]+$/.test(image)),
+    "صورة الخيل غير صالحة أو حجمها كبير",
+  );
+  return image;
+}
 const num = (v: unknown, label: string, min = 0) => {
   const n = Number(v);
   ensure(
@@ -147,7 +166,7 @@ export function applyCommand(
   ensure(/^[a-zA-Z0-9_-]{6,100}$/.test(c.requestId), "معرف العملية غير صحيح");
   const s = structuredClone(input),
     d = c.data ?? {},
-    today = now.slice(0, 10);
+    today = businessDay(now);
   let ownerId: string | undefined;
   const id = c.id || c.requestId;
   // The activity document is also the idempotency receipt, created in the same transaction.
@@ -284,6 +303,7 @@ export function applyCommand(
         boardingFee: num(d.boardingFee, "الرسوم"),
         feeding,
         notes: text(d.notes),
+        photoURL: horsePhoto(d.photoURL ?? old?.photoURL ?? ""),
         createdAt: old?.createdAt ?? now,
         updatedAt: now,
       });
@@ -376,6 +396,10 @@ export function applyCommand(
     case "expense.save": {
       const old = c.id ? find(s, "expenses", id) : null;
       ensure(
+        !old || !s.expensePayments.some((p) => p.expenseId === id),
+        "المصروف مرتبط بسداد؛ أنشئ مصروفًا جديدًا للتغييرات",
+      );
+      ensure(
         !old?.collectedHorseIds?.length,
         "لا يمكن تعديل مصروف تم تحصيل جزء منه",
       );
@@ -410,6 +434,19 @@ export function applyCommand(
         expenseKind !== "feed_purchase" || matchedFeed,
         "اختر صنف العلف المرتبط بالمشتريات",
       );
+      const chargedTo =
+        d.chargedTo ||
+        (d.frequency === "once" && ids.length && expenseKind === "operating"
+          ? "owner"
+          : "stable");
+      const startMonth = d.startMonth || old?.startMonth || "";
+      if (startMonth) monthlyExpense({ id: "validation", cost: 0 }, startMonth);
+      ensure(["stable", "owner"].includes(chargedTo), "حدد من يتحمل المصروف");
+      ensure(
+        chargedTo !== "owner" ||
+          (d.frequency === "once" && ids.length && expenseKind === "operating"),
+        "المصروف المسترد من المالك يجب أن يكون تشغيلًا لمرة واحدة على خيل محددة",
+      );
       put(s, "expenses", {
         id,
         name: required(d.name, "اسم المصروف"),
@@ -417,12 +454,20 @@ export function applyCommand(
         frequency: d.frequency,
         allocationScope,
         expenseKind,
+        chargedTo,
+        startMonth,
+        incurredAt:
+          d.frequency === "once"
+            ? date(
+                d.incurredAt ||
+                  old?.incurredAt ||
+                  businessDay(old?.createdAt) ||
+                  today,
+              )
+            : "",
         ...(matchedFeed ? { mealTypeId: matchedFeed.id } : {}),
         horseIds: ids,
-        allocations:
-          d.frequency === "once" && ids.length && expenseKind === "operating"
-            ? shares(cost, ids)
-            : {},
+        allocations: chargedTo === "owner" ? shares(cost, ids) : {},
         collectedHorseIds: [],
         createdAt: old?.createdAt ?? now,
         updatedAt: now,
@@ -432,11 +477,81 @@ export function applyCommand(
     case "expense.delete":
       ensure(a.role === "admin", "حذف المصروف للمدير فقط");
       ensure(
+        !s.expensePayments.some((p) => p.expenseId === id),
+        "المصروف مرتبط بسجلات سداد ولا يمكن حذفه",
+      );
+      ensure(
         !find(s, "expenses", id).collectedHorseIds?.length,
         "المصروف مرتبط بتحصيل ولا يمكن حذفه",
       );
       s.expenses = s.expenses.filter((e) => e.id !== id);
       break;
+    case "expense.pay": {
+      const e = find(s, "expenses", id);
+      const period = required(d.period, "شهر المصروف");
+      const planned = monthlyExpense(e, period);
+      const remaining = money(planned - expensePaid(s, e.id, period));
+      ensure(remaining > 0, "هذا المصروف مسدد بالكامل لهذه الفترة");
+      ensure(
+        remaining === Number(d.expectedRemaining),
+        "تغير المبلغ المتبقي؛ حدّث الشاشة قبل السداد",
+      );
+      const amount = money(num(d.amount, "المبلغ المدفوع", 0.01));
+      ensure(
+        amount <= remaining,
+        "المبلغ يتجاوز المتبقي لهذه الفترة؛ سجل التكلفة الإضافية كمصروف مستقل",
+      );
+      const paidAt = date(d.paidAt);
+      ensure(paidAt <= today, "لا يمكن تسجيل سداد بتاريخ مستقبلي");
+      e.lockedForPayments = true;
+      s.expensePayments.push({
+        id: c.requestId,
+        expenseId: e.id,
+        expenseName: e.name,
+        amount,
+        period,
+        paidAt,
+        expenseKind: e.expenseKind || "operating",
+        status: "paid",
+        notes: text(d.notes),
+        performedBy: a.uid,
+        createdAt: now,
+      });
+      break;
+    }
+    case "expense.payment.void": {
+      ensure(a.role === "admin", "إلغاء السداد للمدير فقط");
+      const p = find(s, "expensePayments", id);
+      ensure(p.status !== "void", "تم إلغاء السداد سابقًا");
+      p.status = "void";
+      p.voidReason = required(d.reason, "سبب الإلغاء");
+      p.voidedAt = now;
+      p.voidedBy = a.uid;
+      break;
+    }
+    case "finance.snapshot": {
+      ensure(a.role === "admin", "حفظ التقرير المالي للمدير فقط");
+      const month = required(d.month, "الشهر");
+      monthlyExpense({ id: "validation", cost: 0 }, month);
+      ensure(
+        !s.financialReports.some((r) => r.id === month),
+        "يوجد تقرير محفوظ لهذا الشهر",
+      );
+      const summaryText = JSON.stringify(financialSummary(s, month));
+      ensure(
+        new TextEncoder().encode(summaryText).length < 750000,
+        "التقرير أكبر من حد الحفظ؛ استخدم تصدير Excel",
+      );
+      s.financialReports.push({
+        id: month,
+        month,
+        summary: JSON.parse(summaryText),
+        basis: "current_program_full_month",
+        createdAt: now,
+        createdBy: a.uid,
+      });
+      break;
+    }
     case "income.collect": {
       const h = find(s, "horses", id);
       ensure(

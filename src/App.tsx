@@ -49,6 +49,14 @@ import {
 } from "./metrics";
 import { exportExcel, exportPdf } from "./export";
 import { UpdateButton } from "./updates";
+import {
+  FinancialDashboard,
+  HorseFinancialPanel,
+  HorsePhoto,
+} from "./finance-ui";
+import { horseFinance, expensePaid } from "../functions/src/finance";
+import { prepareHorsePhoto } from "./horse-photo";
+import { businessDay } from "../functions/src/dates";
 type Field = {
   name: string;
   label: string;
@@ -66,6 +74,7 @@ type Form = {
   submit: (d: Record<string, any>) => Promise<void>;
   feeding?: boolean;
   horses?: boolean;
+  horsePhoto?: boolean;
   note?: string;
 };
 const roles: Record<string, string> = {
@@ -93,7 +102,7 @@ const frequencies: [string, string][] = [
 ];
 const money = (n: unknown) =>
   Number(n || 0).toLocaleString("ar-SA", { maximumFractionDigits: 2 });
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessDay(new Date().toISOString());
 const HorseIcon = ({ size = 22 }: { size?: number }) => (
   <svg
     width={size}
@@ -145,6 +154,7 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [search, setSearch] = useState(""),
     [archived, setArchived] = useState(false),
+    [horseFilter, setHorseFilter] = useState("all"),
     [month, setMonth] = useState(today().slice(0, 7)),
     [incomeTab, setIncomeTab] = useState("pending"),
     [loginOpen, setLoginOpen] = useState(false),
@@ -209,6 +219,20 @@ export default function App() {
     setSearch("");
     mainRef.current?.scrollTo({ top: 0 });
   };
+  const visibleHorseRows = filtered(
+    s.horses.filter((h) =>
+      archived ? h.status === "archived" : h.status !== "archived",
+    ),
+    ["name", "ownerName"],
+  ).filter((h) => {
+    if (!isStaff || horseFilter === "all") return true;
+    const f = horseFinance(s, h, month);
+    return horseFilter === "loss"
+      ? f.complete && !f.privateHorse && f.margin < 0
+      : horseFilter === "debt"
+        ? f.outstanding > 0
+        : !f.complete;
+  });
   const run = async (fn: () => Promise<void>, close = true) => {
     if (lock.current) return;
     lock.current = true;
@@ -341,6 +365,7 @@ export default function App() {
         feeding: [],
       },
       feeding: true,
+      horsePhoto: true,
       note: "يسجل المدير الخيل مباشرة بدون موافقة المالك أو دعوته. لإضافة مالك جديد استخدم زر «إضافة مالك» في شاشة الخيل.",
       submit: (d) => execute({ action: "horse.save", id: h?.id, data: d }),
     });
@@ -461,6 +486,27 @@ export default function App() {
         },
         { name: "frequency", label: "التكرار", options: frequencies },
         {
+          name: "incurredAt",
+          label: "تاريخ المصروف",
+          type: "date",
+          required: true,
+          when: ["frequency", "once"],
+        },
+        {
+          name: "startMonth",
+          label: "بداية احتساب المصروف (للإجراء المتكرر)",
+          type: "month",
+        },
+        {
+          name: "chargedTo",
+          label: "من يتحمل المصروف؟",
+          when: ["frequency", "once"],
+          options: [
+            ["stable", "على الإسطبل"],
+            ["owner", "يسترد من المالك — تشغيل على خيل محددة"],
+          ],
+        },
+        {
           name: "allocationScope",
           label: "توزيع تكلفة المصروف",
           options: [
@@ -475,18 +521,67 @@ export default function App() {
             allocationScope: expenseIsShared(e) ? "all_active" : "selected",
             expenseKind: isFeedPurchase(s, e) ? "feed_purchase" : "operating",
             mealTypeId: expenseFeedMeal(e, s.mealTypes)?.id || "",
+            incurredAt: e.incurredAt || businessDay(e.createdAt) || today(),
+            chargedTo:
+              e.chargedTo ||
+              (Object.keys(e.allocations || {}).length ? "owner" : "stable"),
           }
         : {
             cost: 0,
             frequency: "monthly",
+            startMonth: month,
             allocationScope: "all_active",
             expenseKind: "operating",
+            chargedTo: "stable",
+            incurredAt: today(),
             horseIds: [],
           },
       horses: true,
-      note: "قيمة المصروف تخص التكرار المختار. راتب 1800 شهريًا ÷ 6 خيول = 300 ريال للخيل. اليومي × أيام الشهر، والأسبوعي × الأيام ÷ 7. مشتريات العلف تظهر منفصلة؛ تكلفة التغذية من استهلاك كل خيل. مصروف التشغيل المحدد لمرة واحدة يضاف للتحصيل كما في الإجراء الحالي.",
-      submit: (d) => execute({ action: "expense.save", id: e?.id, data: d }),
+      note: "قيمة المصروف تخص التكرار المختار. اليومي × أيام الشهر، والأسبوعي × الأيام ÷ 7. الشراء لا يكرر تكلفة استهلاك العلف. الحفظ يسجل التزامًا؛ سجل سداده بزر «تسجيل سداد». لاسترداد مصروف من المالك، اختر تشغيلًا لمرة واحدة على خيل محددة.",
+      submit: (d) =>
+        execute({
+          action: "expense.save",
+          id: e?.id,
+          data: {
+            ...d,
+            chargedTo: d.frequency === "once" ? d.chargedTo : "stable",
+          },
+        }),
     });
+  const payExpense = (e: Row) => {
+    const remaining =
+      Math.round(
+        (monthlyExpense(e, month) - expensePaid(s, e.id, month)) * 100,
+      ) / 100;
+    setForm({
+      title: `سداد ${e.name}`,
+      fields: [
+        {
+          name: "amount",
+          label: "المبلغ المدفوع (ر.س)",
+          type: "number",
+          min: 0.01,
+          max: remaining,
+          required: true,
+        },
+        {
+          name: "paidAt",
+          label: "تاريخ الدفع الفعلي",
+          type: "date",
+          required: true,
+        },
+        { name: "notes", label: "ملاحظة أو مرجع السداد", type: "textarea" },
+      ],
+      values: {
+        amount: remaining,
+        paidAt: today(),
+        period: month,
+        expectedRemaining: remaining,
+      },
+      note: `سداد يخص مصروف ${month}. المتبقي ${money(remaining)} ريال. يظهر في الحركة النقدية حسب تاريخ الدفع الفعلي.`,
+      submit: (d) => execute({ action: "expense.pay", id: e.id, data: d }),
+    });
+  };
   const memberForm = (u?: Row, o?: Row) =>
     setForm({
       title: u ? "تعديل عضو وصلاحيته" : "تسجيل عضو جديد",
@@ -554,9 +649,13 @@ export default function App() {
       title: h.name,
       content: (
         <>
-          <div className="profile-icon">
-            <HorseIcon size={55} />
-          </div>
+          <HorsePhoto horse={h} large />
+          <HorseFinancialPanel
+            state={s}
+            horse={h}
+            month={month}
+            staff={isStaff}
+          />
           <dl>
             <dt>المالك</dt>
             <dd>{h.ownerName}</dd>
@@ -641,6 +740,52 @@ export default function App() {
           </div>
           {isStaff && (
             <div className="actions">
+              {["boarding", "boarding_breeding"].includes(h.status) && (
+                <Button kind="gold" onClick={() => collect(h)}>
+                  تسجيل تحصيل
+                </Button>
+              )}
+              {h.status !== "archived" && (
+                <Button
+                  kind="outline"
+                  onClick={() => {
+                    setDetail(null);
+                    setForm({
+                      title: `مصروف خاص · ${h.name}`,
+                      fields: [
+                        { name: "name", label: "اسم المصروف", required: true },
+                        {
+                          name: "cost",
+                          label: "التكلفة (ر.س)",
+                          type: "number",
+                          min: 0.01,
+                          required: true,
+                        },
+                        {
+                          name: "chargedTo",
+                          label: "من يتحمله؟",
+                          options: [
+                            ["stable", "الإسطبل"],
+                            ["owner", "يسترد من المالك"],
+                          ],
+                        },
+                      ],
+                      values: {
+                        frequency: "once",
+                        expenseKind: "operating",
+                        allocationScope: "selected",
+                        horseIds: [h.id],
+                        chargedTo: "stable",
+                      },
+                      note: "يسجل تكلفة خاصة بهذا الخيل. الدفع الفعلي يسجل من المصروفات. لا يضاف إلى حساب المالك إلا عند اختيار استرداده منه.",
+                      submit: (d) =>
+                        execute({ action: "expense.save", data: d }),
+                    });
+                  }}
+                >
+                  إضافة مصروف
+                </Button>
+              )}
               <Button
                 onClick={() => {
                   setDetail(null);
@@ -890,7 +1035,12 @@ export default function App() {
           </>
         ) : (
           <div className="content">
-            {tab === "dashboard" && (
+            {a.dataReady === false && (
+              <section className="card" role="status">
+                جارٍ تحميل سجلات الإسطبل…
+              </section>
+            )}
+            {a.dataReady !== false && tab === "dashboard" && (
               <>
                 {heading(`مرحبًا، ${a.displayName}`)}
                 <label className="period">
@@ -904,47 +1054,94 @@ export default function App() {
                     }
                   />
                 </label>
-                <div className="dashboard-grid">
-                  <button className="stat dark" onClick={() => go("horses")}>
-                    <HorseIcon />
-                    <span>{isStaff ? "الخيل في الإسطبل" : "خيلك المسجلة"}</span>
-                    <strong>{money(active.length)}</strong>
-                    <small>
-                      عرض التفاصيل <ArrowUpLeft size={16} />
-                    </small>
-                  </button>
-                  <button className="stat gold" onClick={() => go("income")}>
-                    <Wallet />
-                    <span>المبالغ المحصلة</span>
-                    <strong>{money(stats.collected)}</strong>
-                    <small>ريال سعودي · خلال الفترة</small>
-                  </button>
-                  <button className="stat" onClick={() => go("requests")}>
-                    <ClipboardList />
-                    <span>{isStaff ? "طلبات تحتاج مراجعة" : "طلباتك"}</span>
-                    <strong>
-                      {isStaff ? pending.length : s.registrationRequests.length}
-                    </strong>
-                    <small>
-                      متابعة التسجيل <ArrowUpLeft size={16} />
-                    </small>
-                  </button>
-                  <button
-                    className="stat"
-                    onClick={() => go(isStaff ? "owners" : "income")}
-                  >
-                    <Users />
-                    <span>{isStaff ? "الملاك" : "رسوم الإيواء الشهرية"}</span>
-                    <strong>
-                      {isStaff
-                        ? new Set(active.map((h) => h.ownerId)).size
-                        : money(stats.expected)}
-                    </strong>
-                    <small>
-                      {isStaff ? "أصحاب الخيل النشطة" : "ريال سعودي"}
-                    </small>
-                  </button>
-                </div>
+                {isStaff && (
+                  <FinancialDashboard
+                    state={s}
+                    month={month}
+                    onGo={go}
+                    onHorse={horseDetail}
+                    admin={isAdmin}
+                    onSave={() =>
+                      confirm(
+                        "حفظ تقرير الشهر",
+                        "يحفظ الأرقام الحالية وتفاصيل تكلفة كل خيل بتاريخ اليوم. لن تتغير هذه النسخة بتعديل الأسعار أو التسجيلات التالية. الحسابات تقديرية بالبرنامج الحالي لشهر كامل.",
+                        () =>
+                          execute({
+                            action: "finance.snapshot",
+                            data: { month },
+                          }),
+                      )
+                    }
+                  />
+                )}
+                {!isStaff && (
+                  <>
+                    <div className="dashboard-grid">
+                      <button
+                        className="stat dark"
+                        onClick={() => go("horses")}
+                      >
+                        <HorseIcon />
+                        <span>
+                          {isStaff ? "الخيل في الإسطبل" : "خيلك المسجلة"}
+                        </span>
+                        <strong>{money(active.length)}</strong>
+                        <small>
+                          عرض التفاصيل <ArrowUpLeft size={16} />
+                        </small>
+                      </button>
+                      <button
+                        className="stat gold"
+                        onClick={() => go("income")}
+                      >
+                        <Wallet />
+                        <span>المبالغ المحصلة</span>
+                        <strong>{money(stats.collected)}</strong>
+                        <small>ريال سعودي · خلال الفترة</small>
+                      </button>
+                      <button className="stat" onClick={() => go("requests")}>
+                        <ClipboardList />
+                        <span>{isStaff ? "طلبات تحتاج مراجعة" : "طلباتك"}</span>
+                        <strong>
+                          {isStaff
+                            ? pending.length
+                            : s.registrationRequests.length}
+                        </strong>
+                        <small>
+                          متابعة التسجيل <ArrowUpLeft size={16} />
+                        </small>
+                      </button>
+                      <button
+                        className="stat"
+                        onClick={() => go(isStaff ? "owners" : "income")}
+                      >
+                        <Users />
+                        <span>
+                          {isStaff ? "الملاك" : "رسوم الإيواء الشهرية"}
+                        </span>
+                        <strong>
+                          {isStaff
+                            ? new Set(active.map((h) => h.ownerId)).size
+                            : money(stats.expected)}
+                        </strong>
+                        <small>
+                          {isStaff ? "أصحاب الخيل النشطة" : "ريال سعودي"}
+                        </small>
+                      </button>
+                    </div>
+                  </>
+                )}
+                {isStaff && (
+                  <div className="operations-strip">
+                    <button onClick={() => go("horses")}>
+                      {active.length} خيل نشطة
+                    </button>
+                    <button onClick={() => go("requests")}>
+                      {pending.length} طلبات
+                    </button>
+                    <button onClick={() => go("owners")}>سجل الملاك</button>
+                  </div>
+                )}
                 <div className="section-heading compact">
                   <h2>إجراء سريع</h2>
                   <span className="muted">من هنا تبدأ</span>
@@ -974,49 +1171,6 @@ export default function App() {
                 </div>
                 {isStaff && (
                   <>
-                    <section className="card">
-                      <div className="section-heading compact">
-                        <h2>تكلفة التشغيل</h2>
-                        <span className="pill">تقديرية</span>
-                      </div>
-                      <div className="big-number">
-                        {money(stats.total)} <small>ر.س</small>
-                      </div>
-                      <div className="cost-bar">
-                        <i
-                          style={{
-                            width: `${stats.total ? (stats.feeding / stats.total) * 100 : 0}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="spread">
-                        <span>التغذية {money(stats.feeding)}</span>
-                        <span>المصروفات {money(stats.other)}</span>
-                      </div>
-                      <p className="muted small">
-                        التغذية حسب البرنامج الحالي وأيام الشهر؛ لا تمثل سجل
-                        استهلاك تاريخيًا. المصروفات حسب التكرار، والمشتركة موزعة
-                        على جميع الخيل النشطة.
-                      </p>
-                      <p className="muted small">
-                        مشتريات العلف المسجلة: {money(stats.purchases)} ر.س —
-                        معروضة منفصلة ولا تضاف فوق تكلفة الاستهلاك.
-                      </p>
-                      <div className="ledger">
-                        <span>الإيواء الشهري المتوقع</span>
-                        <b>{money(stats.expected)} ر.س</b>
-                        <span>المحصل − التكلفة التقديرية</span>
-                        <b>{money(stats.balance)} ر.س</b>
-                        <span>خيل متأخرة عن الاستحقاق</span>
-                        <b>
-                          {
-                            active.filter(
-                              (h) => h.dueDate && h.dueDate < today(),
-                            ).length
-                          }
-                        </b>
-                      </div>
-                    </section>
                     <section className="card">
                       <h2>تنبيهات المخزون</h2>
                       {s.mealTypes.filter(
@@ -1055,7 +1209,7 @@ export default function App() {
                       const m = d.toISOString().slice(0, 7),
                         v = s.income
                           .filter(
-                            (x) => String(x.collectedAt).slice(0, 7) === m,
+                            (x) => businessDay(x.collectedAt).slice(0, 7) === m,
                           )
                           .reduce((n, x) => n + x.amount, 0),
                         max =
@@ -1081,7 +1235,9 @@ export default function App() {
                 <div className="actions">
                   <Button
                     kind="outline"
-                    onClick={() => void run(() => exportExcel(s, month), false)}
+                    onClick={() =>
+                      void run(() => exportExcel(s, month, isStaff), false)
+                    }
                   >
                     <Download size={17} />
                     Excel
@@ -1135,40 +1291,84 @@ export default function App() {
                     الأرشيف
                   </button>
                 </div>
-                {filtered(
-                  s.horses.filter((h) =>
-                    archived
-                      ? h.status === "archived"
-                      : h.status !== "archived",
-                  ),
-                  ["name", "ownerName"],
-                ).map((h) => (
-                  <button
-                    className="horse-card card"
-                    key={h.id}
-                    onClick={() => horseDetail(h)}
-                  >
-                    <div className="horse-avatar">
-                      <HorseIcon size={36} />
-                    </div>
-                    <div>
-                      <h2>{h.name}</h2>
-                      <p>{h.ownerName}</p>
-                      <span className="pill">
-                        {status[h.status] || h.status}
-                      </span>
-                    </div>
-                    <ChevronLeft />
-                  </button>
-                ))}
-                {!filtered(
-                  s.horses.filter((h) =>
-                    archived
-                      ? h.status === "archived"
-                      : h.status !== "archived",
-                  ),
-                  ["name", "ownerName"],
-                ).length && <Empty />}
+                <label className="period">
+                  شهر الحساب{" "}
+                  <input
+                    type="month"
+                    aria-label="شهر حساب الخيل"
+                    value={month}
+                    onChange={(e) =>
+                      setMonth(e.target.value || today().slice(0, 7))
+                    }
+                  />
+                </label>
+                {isStaff && (
+                  <label className="field">
+                    <span>عرض الخيل</span>
+                    <select
+                      value={horseFilter}
+                      onChange={(e) => setHorseFilter(e.target.value)}
+                    >
+                      <option value="all">جميع الخيل</option>
+                      <option value="loss">تكلفته أعلى من دخله</option>
+                      <option value="debt">متبقي على المالك</option>
+                      <option value="incomplete">بيانات تكلفة ناقصة</option>
+                    </select>
+                  </label>
+                )}
+                {visibleHorseRows.map((h) => {
+                  const f = horseFinance(s, h, month);
+                  return (
+                    <button
+                      className="horse-card card financial-horse-card"
+                      key={h.id}
+                      onClick={() => horseDetail(h)}
+                    >
+                      <HorsePhoto horse={h} />
+                      <div>
+                        <div className="spread">
+                          <h2>{h.name}</h2>
+                          <span className="pill">
+                            {status[h.status] || h.status}
+                          </span>
+                        </div>
+                        <p>{h.ownerName}</p>
+                        {isStaff && (
+                          <div className="horse-finance-line">
+                            <span>الدخل {money(f.revenue)}</span>
+                            <span>التكلفة {money(f.total)}</span>
+                          </div>
+                        )}
+                        {isStaff && (
+                          <p
+                            className={
+                              !f.complete
+                                ? "value-warning"
+                                : !f.privateHorse && f.margin < 0
+                                  ? "value-negative"
+                                  : "value-positive"
+                            }
+                          >
+                            {f.privateHorse
+                              ? "ملك الإسطبل · تكلفة فقط"
+                              : !f.complete
+                                ? "التكلفة غير مكتملة"
+                                : `الصافي المقدّر ${money(f.margin)} ر.س`}
+                          </p>
+                        )}
+                        <b
+                          className={`small ${f.outstanding ? "value-negative" : "muted"}`}
+                        >
+                          متبقي على المالك {money(f.outstanding)} ر.س
+                        </b>
+                      </div>
+                      <ChevronLeft />
+                    </button>
+                  );
+                })}
+                {!visibleHorseRows.length && (
+                  <Empty text="لا توجد خيل تطابق البحث والتصفية" />
+                )}
               </>
             )}
             {tab === "requests" && (
@@ -1447,7 +1647,15 @@ export default function App() {
                         )}
                       </section>
                     ))
-                  : filtered(s.income, ["horseName", "ownerName"])
+                  : filtered(
+                      s.income.filter(
+                        (i) =>
+                          businessDay(i.collectedAt).slice(0, 7) === month &&
+                          i.status !== "pending" &&
+                          i.status !== "void",
+                      ),
+                      ["horseName", "ownerName"],
+                    )
                       .slice()
                       .reverse()
                       .map((i) => (
@@ -1474,9 +1682,13 @@ export default function App() {
                           ))}
                         </section>
                       ))}
-                {incomeTab === "collected" && !s.income.length && (
-                  <Empty text="لا توجد عمليات تحصيل بعد" />
-                )}
+                {incomeTab === "collected" &&
+                  !s.income.some(
+                    (i) =>
+                      businessDay(i.collectedAt).slice(0, 7) === month &&
+                      i.status !== "pending" &&
+                      i.status !== "void",
+                  ) && <Empty text="لا توجد عمليات تحصيل بعد" />}
               </>
             )}
             {tab === "expenses" && isStaff && (
@@ -1491,6 +1703,17 @@ export default function App() {
                     <Plus />
                   </button>,
                 )}
+                <label className="period">
+                  شهر المصروف{" "}
+                  <input
+                    type="month"
+                    aria-label="شهر المصروف"
+                    value={month}
+                    onChange={(e) =>
+                      setMonth(e.target.value || today().slice(0, 7))
+                    }
+                  />
+                </label>
                 {s.expenses.map((e) => (
                   <section className="card" key={e.id}>
                     <div className="spread">
@@ -1523,9 +1746,33 @@ export default function App() {
                         الاستهلاك المسجلة لكل خيل ولا تكرر قيمة الشراء.
                       </p>
                     )}
-                    {e.collectedHorseIds?.length > 0 ? (
+                    <div className="payment-summary">
+                      <span>
+                        سداد يخص {month}: {money(expensePaid(s, e.id, month))}{" "}
+                        ر.س
+                      </span>
+                      <b>
+                        متبقي{" "}
+                        {money(
+                          Math.max(
+                            0,
+                            monthlyExpense(e, month) -
+                              expensePaid(s, e.id, month),
+                          ),
+                        )}{" "}
+                        ر.س
+                      </b>
+                    </div>
+                    {monthlyExpense(e, month) > expensePaid(s, e.id, month) && (
+                      <Button kind="gold" onClick={() => payExpense(e)}>
+                        تسجيل سداد مصروف
+                      </Button>
+                    )}
+                    {e.collectedHorseIds?.length > 0 ||
+                    s.expensePayments.some((p) => p.expenseId === e.id) ? (
                       <p className="notice">
-                        مرتبط بتحصيل؛ يحتفظ السجل بتوزيع التكلفة الأصلي.
+                        مرتبط بسجلات مالية؛ يحتفظ السجل بالتكلفة والتوزيع
+                        الأصليين.
                       </p>
                     ) : (
                       <div className="actions">
@@ -1554,6 +1801,77 @@ export default function App() {
                     )}
                   </section>
                 ))}
+                <section className="card">
+                  <h2>سجل سداد مصروفات {month}</h2>
+                  {s.expensePayments
+                    .filter(
+                      (p) =>
+                        p.period === month ||
+                        String(p.paidAt).slice(0, 7) === month,
+                    )
+                    .slice()
+                    .sort((a, b) =>
+                      String(b.createdAt).localeCompare(String(a.createdAt)),
+                    )
+                    .map((p) => (
+                      <div className="payment-record" key={p.id}>
+                        <div className="spread">
+                          <b>{p.expenseName}</b>
+                          <b
+                            className={
+                              p.status === "void" ? "void-payment" : ""
+                            }
+                          >
+                            {money(p.amount)} ر.س
+                          </b>
+                        </div>
+                        <p className="small muted">
+                          دُفع {p.paidAt} · يخص {p.period}{" "}
+                          {p.notes ? `· ${p.notes}` : ""}
+                        </p>
+                        {p.status === "void" ? (
+                          <p className="small value-negative">
+                            سداد ملغى: {p.voidReason}
+                          </p>
+                        ) : (
+                          isAdmin && (
+                            <button
+                              className="danger-text"
+                              onClick={() =>
+                                setForm({
+                                  title: "إلغاء سداد مسجل",
+                                  fields: [
+                                    {
+                                      name: "reason",
+                                      label: "سبب الإلغاء",
+                                      required: true,
+                                    },
+                                  ],
+                                  values: {},
+                                  note: `سيُلغى أثر سداد ${money(p.amount)} ريال للمصروف «${p.expenseName}» مع حفظ السجل والسبب.`,
+                                  submit: (d) =>
+                                    execute({
+                                      action: "expense.payment.void",
+                                      id: p.id,
+                                      data: d,
+                                    }),
+                                })
+                              }
+                            >
+                              إلغاء السداد
+                            </button>
+                          )
+                        )}
+                      </div>
+                    ))}
+                  {!s.expensePayments.some(
+                    (p) =>
+                      p.period === month ||
+                      String(p.paidAt).slice(0, 7) === month,
+                  ) && (
+                    <p className="muted">لا توجد مدفوعات مسجلة لهذه الفترة.</p>
+                  )}
+                </section>
                 {!s.expenses.length && <Empty />}
               </>
             )}
@@ -1904,7 +2222,7 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.4.0 · أندرويد
+                  الأثيل · الإصدار 1.5.0 · أندرويد
                 </p>
                 <UpdateButton />
               </>
@@ -2063,16 +2381,66 @@ function FormView({
   const [v, set] = useState<Record<string, any>>(() =>
     structuredClone(form.values),
   );
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
   const update = (name: string, value: unknown) =>
     set((p) => ({ ...p, [name]: value }));
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit(v);
+        if (!photoBusy) onSubmit(v);
       }}
     >
       {form.note && <p className="notice">{form.note}</p>}
+      {form.horsePhoto && (
+        <section className="photo-field">
+          <span>صورة الخيل (اختيارية)</span>
+          <HorsePhoto
+            horse={{ ...v, id: "preview", name: v.name || "الخيل" }}
+            large
+          />
+          <label className="button outline">
+            {photoBusy ? "جارٍ تجهيز الصورة…" : "اختيار صورة الخيل"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={photoBusy || busy}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                setPhotoBusy(true);
+                setPhotoError("");
+                try {
+                  update("photoURL", await prepareHorsePhoto(file));
+                } catch (err) {
+                  setPhotoError((err as Error).message);
+                } finally {
+                  setPhotoBusy(false);
+                }
+              }}
+            />
+          </label>
+          {v.photoURL && (
+            <button
+              type="button"
+              className="danger-text"
+              onClick={() => {
+                update("photoURL", "");
+                setPhotoError("");
+              }}
+            >
+              إزالة صورة الخيل
+            </button>
+          )}
+          {photoError && (
+            <p className="value-negative" role="alert">
+              {photoError}
+            </p>
+          )}
+        </section>
+      )}
       {form.fields
         .filter((f) => !f.when || v[f.when[0]] === f.when[1])
         .map((f) => (
@@ -2220,7 +2588,11 @@ function FormView({
             ))}
         </fieldset>
       )}
-      <button className="button gold" type="submit" disabled={busy}>
+      <button
+        className="button gold"
+        type="submit"
+        disabled={busy || photoBusy}
+      >
         {busy ? "جارٍ الحفظ…" : "حفظ ومتابعة"}
       </button>
     </form>
@@ -2241,6 +2613,9 @@ function actionLabel(action: string) {
         "meal.delete": "حذف صنف",
         "stock.move": "حركة مخزون",
         "expense.save": "تسجيل مصروف",
+        "expense.pay": "سداد مصروف",
+        "expense.payment.void": "إلغاء سداد مصروف",
+        "finance.snapshot": "حفظ التقرير المالي",
         "expense.delete": "حذف مصروف",
         "income.collect": "تحصيل رسوم الإيواء",
         "profile.save": "تحديث الحساب",
