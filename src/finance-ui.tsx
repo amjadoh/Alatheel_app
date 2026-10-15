@@ -101,13 +101,15 @@ export function HorseFinancialPanel({
       {staff && (
         <>
           <div
-            className={`profit-banner ${!f.complete ? "incomplete" : f.margin < 0 && !f.privateHorse ? "negative" : "positive"}`}
+            className={`profit-banner ${f.margin < 0 && !f.privateHorse ? "negative" : !f.complete ? "incomplete" : "positive"}`}
           >
             <span>
               {f.privateHorse
                 ? "ملك الإسطبل · تكلفة بدون إيراد إيواء"
                 : !f.complete
-                  ? "الصافي المبدئي · التكلفة غير مكتملة"
+                  ? f.margin < 0
+                    ? "عجز مقدّر على الأقل · تكلفة ناقصة"
+                    : "الصافي المبدئي · التكلفة غير مكتملة"
                   : f.margin < 0
                     ? "عجز تشغيل مقدّر"
                     : "فائض تشغيل مقدّر"}

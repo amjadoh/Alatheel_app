@@ -436,3 +436,12 @@ test("a backdated one-off expense and its payment are assigned to their own peri
   assert.equal(financialSummary(s, "2026-09").paid, 0);
   assert.equal(financialSummary(s, "2026-10").paid, 100);
 });
+test("known costs exceeding income still flag a minimum deficit when more feed costs are missing", () => {
+  const s = seed();
+  s.horses[0].boardingFee = 100;
+  s.horses[0].feeding = [];
+  const h = horseFinance(s, s.horses[0], "2026-10");
+  assert.equal(h.complete, false);
+  assert.equal(h.margin, -200);
+  assert.equal(financialSummary(s, "2026-10").lossCount, 1);
+});

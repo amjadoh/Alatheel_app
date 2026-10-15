@@ -228,7 +228,7 @@ export default function App() {
     if (!isStaff || horseFilter === "all") return true;
     const f = horseFinance(s, h, month);
     return horseFilter === "loss"
-      ? f.complete && !f.privateHorse && f.margin < 0
+      ? !f.privateHorse && f.margin < 0
       : horseFilter === "debt"
         ? f.outstanding > 0
         : !f.complete;
@@ -1342,18 +1342,20 @@ export default function App() {
                         {isStaff && (
                           <p
                             className={
-                              !f.complete
-                                ? "value-warning"
-                                : !f.privateHorse && f.margin < 0
-                                  ? "value-negative"
+                              !f.privateHorse && f.margin < 0
+                                ? "value-negative"
+                                : !f.complete
+                                  ? "value-warning"
                                   : "value-positive"
                             }
                           >
                             {f.privateHorse
                               ? "ملك الإسطبل · تكلفة فقط"
-                              : !f.complete
-                                ? "التكلفة غير مكتملة"
-                                : `الصافي المقدّر ${money(f.margin)} ر.س`}
+                              : f.margin < 0
+                                ? `عجز ${money(Math.abs(f.margin))} ر.س${!f.complete ? " على الأقل · تكلفة ناقصة" : ""}`
+                                : !f.complete
+                                  ? "التكلفة غير مكتملة"
+                                  : `الصافي المقدّر ${money(f.margin)} ر.س`}
                           </p>
                         )}
                         <b

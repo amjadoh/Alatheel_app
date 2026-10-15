@@ -196,9 +196,8 @@ export function financialSummary(s: State, month: string) {
     cashBalance: money(base.collected - paid),
     outstanding,
     debtCount: rows.filter((h) => h.outstanding > 0).length,
-    lossCount: rows.filter(
-      (h) => h.active && !h.privateHorse && h.complete && h.margin < 0,
-    ).length,
+    lossCount: rows.filter((h) => h.active && !h.privateHorse && h.margin < 0)
+      .length,
     incompleteCount: rows.filter((h) => h.active && !h.complete).length,
     expensePaymentCount: s.expensePayments.filter(
       (p) => p.status !== "void" && day(p.paidAt).slice(0, 7) === month,
