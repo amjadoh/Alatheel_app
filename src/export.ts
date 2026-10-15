@@ -2,7 +2,14 @@ import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { State } from "./service";
-import { horseCost } from "./metrics";
+import {
+  horseCost,
+  feedingMeasure,
+  feedingUnitPrice,
+  monthlyExpense,
+  expenseIsShared,
+  isFeedPurchase,
+} from "./metrics";
 export async function exportExcel(s: State, month: string) {
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook();
@@ -47,19 +54,47 @@ export async function exportExcel(s: State, month: string) {
     ],
     [
       "المخزون",
-      ["الصنف", "الوحدة", "الرصيد", "حد التنبيه", "سعر الوحدة"],
+      [
+        "الصنف",
+        "وحدة الشراء",
+        "الرصيد",
+        "حد التنبيه",
+        "سعر وحدة الشراء",
+        "وحدة التغذية",
+        "وحدات التغذية في وحدة الشراء",
+        "سعر وحدة التغذية",
+      ],
       s.mealTypes.map((m) => [
         m.name,
         m.unit,
         m.currentStock,
         m.minThreshold,
         m.pricePerUnit,
+        feedingMeasure(m).unit,
+        feedingMeasure(m).unitsPerPurchaseUnit,
+        feedingUnitPrice(m),
       ]),
     ],
     [
       "المصروفات",
-      ["المصروف", "التكلفة", "التكرار"],
-      s.expenses.map((e) => [e.name, e.cost, e.frequency]),
+      [
+        "المصروف",
+        "القيمة لكل تكرار",
+        "التكرار",
+        "التوزيع",
+        "التصنيف",
+        `قيمة ${month}`,
+      ],
+      s.expenses.map((e) => [
+        e.name,
+        e.cost,
+        e.frequency,
+        expenseIsShared(e) ? "جميع الخيل النشطة" : "الخيل المحددة",
+        isFeedPurchase(s, e)
+          ? "شراء علف — خارج تكلفة الاستهلاك"
+          : "تشغيل — ضمن التكلفة",
+        monthlyExpense(e, month),
+      ]),
     ],
   ];
   for (const [name, headers, rows] of sheets) {

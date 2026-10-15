@@ -37,7 +37,16 @@ import {
   nextMonth,
 } from "./service";
 import { emptyState } from "../functions/src/domain";
-import { costs, horseCost } from "./metrics";
+import {
+  costs,
+  horseCost,
+  feedingMeasure,
+  feedingUnitPrice,
+  monthlyExpense,
+  expenseIsShared,
+  isFeedPurchase,
+  expenseFeedMeal,
+} from "./metrics";
 import { exportExcel, exportPdf } from "./export";
 type Field = {
   name: string;
@@ -47,6 +56,7 @@ type Field = {
   options?: [string, string][];
   min?: number;
   max?: number;
+  when?: [string, string];
 };
 type Form = {
   title: string;
@@ -338,12 +348,28 @@ export default function App() {
       title: m ? "تعديل صنف" : "صنف جديد",
       fields: [
         { name: "name", label: "اسم الصنف", required: true },
-        { name: "unit", label: "وحدة القياس", required: true },
+        {
+          name: "unit",
+          label: "وحدة الشراء والمخزون (مثل كيس 40 كجم)",
+          required: true,
+        },
         {
           name: "pricePerUnit",
-          label: "سعر الوحدة",
+          label: "سعر وحدة الشراء (ر.س)",
           type: "number",
           min: 0,
+          required: true,
+        },
+        {
+          name: "feedingUnit",
+          label: "وحدة كمية التغذية اليومية (مثل كجم أو ربطة)",
+          required: true,
+        },
+        {
+          name: "feedingUnitsPerPurchaseUnit",
+          label: "كم وحدة تغذية في وحدة الشراء؟ (كيس 40 كجم = 40)",
+          type: "number",
+          min: 0.001,
           required: true,
         },
         {
@@ -365,16 +391,24 @@ export default function App() {
             ]
           : []),
       ],
-      values: m || {
-        unit: "كجم",
-        pricePerUnit: 0,
-        minThreshold: 10,
-        currentStock: 0,
-      },
+      values: m
+        ? {
+            ...m,
+            feedingUnit: feedingMeasure(m).unit,
+            feedingUnitsPerPurchaseUnit: feedingMeasure(m).unitsPerPurchaseUnit,
+          }
+        : {
+            unit: "كجم",
+            feedingUnit: "كجم",
+            feedingUnitsPerPurchaseUnit: 1,
+            pricePerUnit: 0,
+            minThreshold: 10,
+            currentStock: 0,
+          },
       submit: (d) => execute({ action: "meal.save", id: m?.id, data: d }),
       note: m
-        ? "لتغيير الرصيد استخدم إضافة أو صرف، للحفاظ على سجل الحركات."
-        : undefined,
+        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. مثال: كيس 40 كجم بسعر 90 ريالًا = 2.25 ريال للكجم. الرصيد وحركاته بوحدة الشراء؛ لتغيير الرصيد استخدم إضافة أو صرف."
+        : "حدد وحدة الشراء ووحدة التغذية: كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم. للربطة الكاملة كوحدة تغذية اكتب ربطة والعدد 1.",
     });
   const move = (m: Row, type: string) =>
     setForm({
@@ -400,6 +434,24 @@ export default function App() {
       fields: [
         { name: "name", label: "اسم المصروف", required: true },
         {
+          name: "expenseKind",
+          label: "نوع المصروف",
+          options: [
+            ["operating", "تشغيل (راتب، خدمات، وغيرها)"],
+            ["feed_purchase", "شراء علف — يظهر منفصلًا عن تكلفة الاستهلاك"],
+          ],
+        },
+        {
+          name: "mealTypeId",
+          label: "صنف العلف المشترى",
+          required: true,
+          when: ["expenseKind", "feed_purchase"],
+          options: [
+            ["", "اختر الصنف"],
+            ...s.mealTypes.map((m) => [m.id, m.name] as [string, string]),
+          ],
+        },
+        {
           name: "cost",
           label: "التكلفة (ر.س)",
           type: "number",
@@ -407,10 +459,31 @@ export default function App() {
           required: true,
         },
         { name: "frequency", label: "التكرار", options: frequencies },
+        {
+          name: "allocationScope",
+          label: "توزيع تكلفة المصروف",
+          options: [
+            ["all_active", "بالتساوي على جميع الخيل النشطة"],
+            ["selected", "على خيل محددة"],
+          ],
+        },
       ],
-      values: e || { cost: 0, frequency: "once", horseIds: [] },
+      values: e
+        ? {
+            ...e,
+            allocationScope: expenseIsShared(e) ? "all_active" : "selected",
+            expenseKind: isFeedPurchase(s, e) ? "feed_purchase" : "operating",
+            mealTypeId: expenseFeedMeal(e, s.mealTypes)?.id || "",
+          }
+        : {
+            cost: 0,
+            frequency: "monthly",
+            allocationScope: "all_active",
+            expenseKind: "operating",
+            horseIds: [],
+          },
       horses: true,
-      note: "عدم تحديد خيل يعني مصروفًا عامًا. المصروف لمرة واحدة يوزع بالتساوي على الخيل المحددة ويضاف للتحصيل مرة واحدة.",
+      note: "قيمة المصروف تخص التكرار المختار. راتب 1800 شهريًا ÷ 6 خيول = 300 ريال للخيل. اليومي × أيام الشهر، والأسبوعي × الأيام ÷ 7. مشتريات العلف تظهر منفصلة؛ تكلفة التغذية من استهلاك كل خيل. مصروف التشغيل المحدد لمرة واحدة يضاف للتحصيل كما في الإجراء الحالي.",
       submit: (d) => execute({ action: "expense.save", id: e?.id, data: d }),
     });
   const memberForm = (u?: Row, o?: Row) =>
@@ -499,7 +572,38 @@ export default function App() {
           </dl>
           {isStaff && (
             <div className="notice">
-              تكلفة تقديرية للشهر: {money(c.total)} ر.س
+              <b>
+                تكلفة {month} التقديرية: {money(c.total)} ر.س
+              </b>
+              <p>
+                التغذية: {money(c.food)} ر.س · المصروفات: {money(c.other)} ر.س
+              </p>
+              {c.foodItems.map((f: any, i: number) => (
+                <p className="small" key={`food-${i}`}>
+                  {f.name}: {f.quantity} {f.unit}/يوم × {money(f.rate)} ر.س ×{" "}
+                  {c.days} يومًا = {money(f.amount)} ر.س
+                </p>
+              ))}
+              {c.expenseItems.map((e, i) => (
+                <p className="small" key={`expense-${i}`}>
+                  {e.name} (
+                  {frequencies.find(([k]) => k === e.frequency)?.[1] ||
+                    e.frequency}
+                  ): حصة الخيل {money(e.amount)} ر.س من إجمالي شهري{" "}
+                  {money(e.monthlyTotal)} ر.س
+                </p>
+              ))}
+              <small>
+                تقدير لشهر كامل حسب البرنامج والأسعار الحالية. الأسبوعي محسوب
+                بنسبة أيام الشهر ÷ 7. مشتريات العلف منفصلة لتجنب تكرار تكلفة
+                الاستهلاك.
+              </small>
+              {c.missingFeed.map((item) => (
+                <p className="small" key={item}>
+                  تنبيه: توجد مشتريات «{item}» ولا توجد كمية يومية مسجلة لهذا
+                  الخيل؛ لم تُضف تكلفة استهلاكه لهذا الصنف.
+                </p>
+              ))}
             </div>
           )}
           <p>{h.notes || "لا توجد ملاحظات"}</p>
@@ -509,7 +613,13 @@ export default function App() {
               <p key={i}>
                 {s.mealTypes.find((m) => m.id === f.mealTypeId)?.name ||
                   "صنف تغذية"}{" "}
-                · {f.quantity}
+                · {f.quantity}{" "}
+                {
+                  feedingMeasure(
+                    s.mealTypes.find((m) => m.id === f.mealTypeId) || {},
+                  ).unit
+                }{" "}
+                يوميًا
               </p>
             ))
           ) : (
@@ -884,7 +994,12 @@ export default function App() {
                       </div>
                       <p className="muted small">
                         التغذية حسب البرنامج الحالي وأيام الشهر؛ لا تمثل سجل
-                        استهلاك تاريخيًا.
+                        استهلاك تاريخيًا. المصروفات حسب التكرار، والمشتركة موزعة
+                        على جميع الخيل النشطة.
+                      </p>
+                      <p className="muted small">
+                        مشتريات العلف المسجلة: {money(stats.purchases)} ر.س —
+                        معروضة منفصلة ولا تضاف فوق تكلفة الاستهلاك.
                       </p>
                       <div className="ledger">
                         <span>الإيواء الشهري المتوقع</span>
@@ -1198,8 +1313,14 @@ export default function App() {
                       {money(m.currentStock)} <small>{m.unit}</small>
                     </div>
                     <p className="muted">
-                      حد التنبيه {m.minThreshold} · سعر الوحدة{" "}
+                      حد التنبيه {m.minThreshold} · سعر وحدة الشراء{" "}
                       {money(m.pricePerUnit)} ر.س
+                    </p>
+                    <p className="muted small">
+                      وحدة الشراء: {m.unit} · تحتوي{" "}
+                      {feedingMeasure(m).unitsPerPurchaseUnit}{" "}
+                      {feedingMeasure(m).unit} · سعر {feedingMeasure(m).unit}:{" "}
+                      {money(feedingUnitPrice(m))} ر.س
                     </p>
                     <div className="actions">
                       <Button kind="gold" onClick={() => move(m, "add")}>
@@ -1377,15 +1498,30 @@ export default function App() {
                     </div>
                     <p className="muted">
                       {frequencies.find((f) => f[0] === e.frequency)?.[1]} ·{" "}
-                      {e.horseIds?.length
+                      {!expenseIsShared(e)
                         ? e.horseIds
                             .map(
                               (id: string) =>
                                 s.horses.find((h) => h.id === id)?.name || id,
                             )
                             .join("، ")
-                        : "مصروف عام"}
+                        : "موزع على جميع الخيل النشطة"}
                     </p>
+                    <p className="muted small">
+                      {isFeedPurchase(s, e) ? "مشتريات العلف في" : "تكلفة"}{" "}
+                      {month}: {money(monthlyExpense(e, month))} ر.س{" "}
+                      {expenseIsShared(e)
+                        ? active.length
+                          ? `÷ ${active.length} خيل نشطة`
+                          : "بانتظار إضافة خيل نشطة لتوزيعه"
+                        : "على الخيل المرتبطة"}
+                    </p>
+                    {isFeedPurchase(s, e) && (
+                      <p className="notice">
+                        شراء علف: يظهر منفصلًا. تكلفة التغذية تعتمد على كمية
+                        الاستهلاك المسجلة لكل خيل ولا تكرر قيمة الشراء.
+                      </p>
+                    )}
                     {e.collectedHorseIds?.length > 0 ? (
                       <p className="notice">
                         مرتبط بتحصيل؛ يحتفظ السجل بتوزيع التكلفة الأصلي.
@@ -1767,7 +1903,7 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.2.0 · أندرويد
+                  الأثيل · الإصدار 1.3.0 · أندرويد
                 </p>
               </>
             )}
@@ -1935,47 +2071,59 @@ function FormView({
       }}
     >
       {form.note && <p className="notice">{form.note}</p>}
-      {form.fields.map((f) => (
-        <label className="field" key={f.name}>
-          <span>
-            {f.label}
-            {f.required && <b> *</b>}
-          </span>
-          {f.options ? (
-            <select
-              required={f.required}
-              value={v[f.name] ?? f.options[0]?.[0] ?? ""}
-              onChange={(e) => update(f.name, e.target.value)}
-            >
-              {f.options.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          ) : f.type === "textarea" ? (
-            <textarea
-              maxLength={500}
-              value={v[f.name] ?? ""}
-              onChange={(e) => update(f.name, e.target.value)}
-            />
-          ) : (
-            <input
-              type={f.type || "text"}
-              required={f.required}
-              min={f.min}
-              max={f.max}
-              step={f.type === "number" ? "0.01" : undefined}
-              maxLength={f.type === "text" || !f.type ? 500 : undefined}
-              value={v[f.name] ?? ""}
-              onChange={(e) => update(f.name, e.target.value)}
-            />
-          )}
-        </label>
-      ))}
+      {form.fields
+        .filter((f) => !f.when || v[f.when[0]] === f.when[1])
+        .map((f) => (
+          <label className="field" key={f.name}>
+            <span>
+              {f.label}
+              {f.required && <b> *</b>}
+            </span>
+            {f.options ? (
+              <select
+                required={f.required}
+                value={v[f.name] ?? f.options[0]?.[0] ?? ""}
+                onChange={(e) => update(f.name, e.target.value)}
+              >
+                {f.options.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            ) : f.type === "textarea" ? (
+              <textarea
+                maxLength={500}
+                value={v[f.name] ?? ""}
+                onChange={(e) => update(f.name, e.target.value)}
+              />
+            ) : (
+              <input
+                type={f.type || "text"}
+                required={f.required}
+                min={f.min}
+                max={f.max}
+                step={
+                  f.type === "number"
+                    ? f.name === "feedingUnitsPerPurchaseUnit"
+                      ? "any"
+                      : "0.01"
+                    : undefined
+                }
+                maxLength={f.type === "text" || !f.type ? 500 : undefined}
+                value={v[f.name] ?? ""}
+                onChange={(e) => update(f.name, e.target.value)}
+              />
+            )}
+          </label>
+        ))}
       {form.feeding && (
         <fieldset>
           <legend>برنامج التغذية اليومي</legend>
+          <p className="muted small">
+            أدخل إجمالي كمية اليوم بوحدة التغذية الظاهرة بجانب الصنف. المركزات
+            بالكجم؛ تكلفة الكيس تحوّل تلقائيًا حسب وزنه.
+          </p>
           {(v.feeding || []).map((f: any, i: number) => (
             <div className="feeding-row" key={i}>
               <select
@@ -1993,12 +2141,13 @@ function FormView({
               >
                 {state.mealTypes.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name} ({m.unit})
+                    {m.name} ({feedingMeasure(m).unit} يوميًا)
                   </option>
                 ))}
               </select>
               <input
-                aria-label={`الكمية اليومية ${i + 1}`}
+                aria-label={`الكمية اليومية ${i + 1} (${feedingMeasure(state.mealTypes.find((m) => m.id === f.mealTypeId) || {}).unit})`}
+                title={`إجمالي كمية اليوم بوحدة ${feedingMeasure(state.mealTypes.find((m) => m.id === f.mealTypeId) || {}).unit}`}
                 type="number"
                 min="0.01"
                 step="0.01"
@@ -2043,7 +2192,7 @@ function FormView({
           </button>
         </fieldset>
       )}
-      {form.horses && (
+      {form.horses && v.allocationScope === "selected" && (
         <fieldset>
           <legend>ربط المصروف بالخيل</legend>
           {state.horses

@@ -1,0 +1,158 @@
+import { money, shares } from "./domain";
+import type { State, Row } from "./domain";
+import { feedingMeasure, feedingUnitPrice, expenseFeedMeal } from "./feeding";
+
+export function isFeedPurchase(s: State, e: Row) {
+  return e.expenseKind === "feed_purchase" || !!expenseFeedMeal(e, s.mealTypes);
+}
+
+export function monthDays(month: string) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("الشهر غير صحيح");
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+export function monthlyExpense(e: Row, month: string) {
+  const days = monthDays(month),
+    cost = Number(e.cost || 0);
+  if (e.frequency === "once")
+    return String(e.createdAt).slice(0, 7) === month ? money(cost) : 0;
+  return money(
+    cost *
+      (e.frequency === "daily"
+        ? days
+        : e.frequency === "weekly"
+          ? days / 7
+          : 1),
+  );
+}
+
+export const expenseIsShared = (e: Row) =>
+  e.allocationScope === "all_active" || !e.horseIds?.length;
+
+export function expenseShares(s: State, e: Row, month: string) {
+  if (
+    !expenseIsShared(e) &&
+    e.frequency === "once" &&
+    Object.keys(e.allocations || {}).length
+  )
+    return monthlyExpense(e, month)
+      ? (e.allocations as Record<string, number>)
+      : {};
+  const targets = expenseIsShared(e)
+    ? s.horses.filter((h) => h.status !== "archived").map((h) => h.id)
+    : [...new Set<string>(e.horseIds)].filter((id) =>
+        s.horses.some((h) => h.id === id),
+      );
+  return targets.length ? shares(monthlyExpense(e, month), targets.sort()) : {};
+}
+
+function feedingItems(s: State, h: Row, days: number) {
+  return (h.feeding || []).map((f: any) => {
+    const meal = s.mealTypes.find((m) => m.id === f.mealTypeId);
+    const rate = meal ? feedingUnitPrice(meal) : 0;
+    return {
+      name: meal?.name || "صنف غير متاح",
+      unit: meal ? feedingMeasure(meal).unit : "وحدة",
+      quantity: Number(f.quantity),
+      rate,
+      amount: money(Number(f.quantity) * rate * days),
+    };
+  });
+}
+
+export function horseCost(s: State, h: Row, month: string) {
+  const days = monthDays(month);
+  const foodItems = feedingItems(s, h, days);
+  const expenseItems = s.expenses
+    .filter((e) => !isFeedPurchase(s, e))
+    .map((e) => ({
+      name: e.name,
+      frequency: e.frequency,
+      shared: expenseIsShared(e),
+      monthlyTotal: monthlyExpense(e, month),
+      amount: expenseShares(s, e, month)[h.id] || 0,
+    }))
+    .filter((e) => e.amount !== 0);
+  const missingFeed = [
+    ...new Set(
+      s.expenses
+        .filter(
+          (e) =>
+            isFeedPurchase(s, e) &&
+            monthlyExpense(e, month) > 0 &&
+            (expenseIsShared(e)
+              ? h.status !== "archived"
+              : e.horseIds?.includes(h.id)),
+        )
+        .map((e) => expenseFeedMeal(e, s.mealTypes))
+        .filter(
+          (m) =>
+            m &&
+            !h.feeding?.some(
+              (f: any) => f.mealTypeId === m.id && Number(f.quantity) > 0,
+            ),
+        )
+        .map((m) => m!.name as string),
+    ),
+  ];
+  const food = money(
+    foodItems.reduce((sum: number, f: any) => sum + f.amount, 0),
+  );
+  const other = money(expenseItems.reduce((sum, e) => sum + e.amount, 0));
+  return {
+    food,
+    other,
+    total: money(food + other),
+    days,
+    foodItems,
+    expenseItems,
+    missingFeed,
+  };
+}
+
+export function costs(s: State, month: string) {
+  const active = s.horses.filter((h) => h.status !== "archived");
+  const feeding = money(
+    active.reduce(
+      (sum, h) =>
+        sum +
+        money(
+          feedingItems(s, h, monthDays(month)).reduce(
+            (subtotal: number, f: any) => subtotal + f.amount,
+            0,
+          ),
+        ),
+      0,
+    ),
+  );
+  const other = money(
+    s.expenses
+      .filter((e) => !isFeedPurchase(s, e))
+      .reduce((sum, e) => sum + monthlyExpense(e, month), 0),
+  );
+  const purchases = money(
+    s.expenses
+      .filter((e) => isFeedPurchase(s, e))
+      .reduce((sum, e) => sum + monthlyExpense(e, month), 0),
+  );
+  const collected = money(
+    s.income
+      .filter((i) => String(i.collectedAt).slice(0, 7) === month)
+      .reduce((sum, i) => sum + Number(i.amount || 0), 0),
+  );
+  const expected = money(
+    active
+      .filter((h) => ["boarding", "boarding_breeding"].includes(h.status))
+      .reduce((sum, h) => sum + Number(h.boardingFee || 0), 0),
+  );
+  return {
+    feeding,
+    other,
+    total: money(feeding + other),
+    collected,
+    expected,
+    balance: money(collected - feeding - other),
+    purchases,
+  };
+}

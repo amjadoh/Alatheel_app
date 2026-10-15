@@ -1,4 +1,5 @@
 /** Shared, deterministic rules; the server is the authority for every write. */
+import { feedingMeasure, expenseFeedMeal } from "./feeding";
 export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
@@ -320,11 +321,20 @@ export function applyCommand(
     }
     case "meal.save": {
       const old = c.id ? find(s, "mealTypes", id) : null;
+      const measure = feedingMeasure({ ...old, ...d });
       put(s, "mealTypes", {
         id,
         name: required(d.name, "اسم الصنف"),
         unit: required(d.unit, "الوحدة"),
         pricePerUnit: num(d.pricePerUnit, "سعر الوحدة"),
+        feedingUnit: d.feedingUnit
+          ? required(d.feedingUnit, "وحدة التغذية")
+          : measure.unit,
+        feedingUnitsPerPurchaseUnit: num(
+          d.feedingUnitsPerPurchaseUnit ?? measure.unitsPerPurchaseUnit,
+          "عدد وحدات التغذية في وحدة الشراء",
+          0.001,
+        ),
         minThreshold: num(d.minThreshold, "حد التنبيه"),
         currentStock: old?.currentStock ?? num(d.currentStock, "الرصيد"),
       });
@@ -373,17 +383,46 @@ export function applyCommand(
         ["once", "daily", "weekly", "monthly"].includes(d.frequency),
         "حدد التكرار",
       );
-      const ids = [...new Set<string>(d.horseIds ?? [])];
+      const allocationScope =
+        d.allocationScope || (d.horseIds?.length ? "selected" : "all_active");
+      ensure(
+        ["all_active", "selected"].includes(allocationScope),
+        "حدد طريقة توزيع المصروف",
+      );
+      const ids =
+        allocationScope === "all_active"
+          ? []
+          : [...new Set<string>(d.horseIds ?? [])];
+      ensure(
+        allocationScope !== "selected" || ids.length,
+        "اختر الخيل المرتبطة بالمصروف",
+      );
       ids.forEach((i) => find(s, "horses", i));
       const cost = num(d.cost, "التكلفة");
+      const matchedFeed = expenseFeedMeal(d, s.mealTypes);
+      const expenseKind =
+        d.expenseKind || (matchedFeed ? "feed_purchase" : "operating");
+      ensure(
+        ["operating", "feed_purchase"].includes(expenseKind),
+        "حدد نوع المصروف",
+      );
+      ensure(
+        expenseKind !== "feed_purchase" || matchedFeed,
+        "اختر صنف العلف المرتبط بالمشتريات",
+      );
       put(s, "expenses", {
         id,
         name: required(d.name, "اسم المصروف"),
         cost,
         frequency: d.frequency,
+        allocationScope,
+        expenseKind,
+        ...(matchedFeed ? { mealTypeId: matchedFeed.id } : {}),
         horseIds: ids,
         allocations:
-          d.frequency === "once" && ids.length ? shares(cost, ids) : {},
+          d.frequency === "once" && ids.length && expenseKind === "operating"
+            ? shares(cost, ids)
+            : {},
         collectedHorseIds: [],
         createdAt: old?.createdAt ?? now,
         updatedAt: now,

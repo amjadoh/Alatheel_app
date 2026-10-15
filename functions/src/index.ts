@@ -46,7 +46,7 @@ const needs: Record<string, Collection[]> = {
   "meal.save": ["mealTypes"],
   "meal.delete": ["mealTypes", "horses"],
   "stock.move": ["mealTypes"],
-  "expense.save": ["expenses", "horses"],
+  "expense.save": ["expenses", "horses", "mealTypes"],
   "expense.delete": ["expenses"],
   "income.collect": ["horses", "expenses", "income"],
   "profile.save": ["users"],
