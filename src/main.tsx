@@ -5,6 +5,7 @@ import "@fontsource/noto-sans-arabic/600.css";
 import "@fontsource/noto-sans-arabic/800.css";
 import "./style.css";
 import App from "./App";
+import { UpdateGate } from "./updates";
 class Boundary extends React.Component<
   { children: React.ReactNode },
   { failed: boolean }
@@ -26,6 +27,8 @@ class Boundary extends React.Component<
 }
 createRoot(document.getElementById("root")!).render(
   <Boundary>
-    <App />
+    <UpdateGate>
+      <App />
+    </UpdateGate>
   </Boundary>,
 );

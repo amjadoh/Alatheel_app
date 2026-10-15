@@ -48,6 +48,7 @@ import {
   expenseFeedMeal,
 } from "./metrics";
 import { exportExcel, exportPdf } from "./export";
+import { UpdateButton } from "./updates";
 type Field = {
   name: string;
   label: string;
@@ -1903,8 +1904,9 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.3.0 · أندرويد
+                  الأثيل · الإصدار 1.4.0 · أندرويد
                 </p>
+                <UpdateButton />
               </>
             )}
           </div>

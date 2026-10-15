@@ -46,7 +46,7 @@ jobs:
         run: |
           chmod +x gradlew
           test -n "$ALATHEEL_KEYSTORE_PASSWORD"
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew testDebugUnitTest assembleRelease --no-daemon
           keytool -list -keystore app/alatheel-release.p12 -storetype PKCS12 -storepass:env ALATHEEL_KEYSTORE_PASSWORD -alias alatheel > app/build/outputs/apk/release/signing-certificate.txt
       - uses: actions/upload-artifact@v4
         with:
