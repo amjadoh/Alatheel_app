@@ -110,7 +110,10 @@ public class AppUpdaterPlugin extends Plugin {
                 result.put("notes", next.optString("notes", "تحسينات وإصلاحات للتطبيق"));
                 result.put("ready", next.getInt("versionCode") > installed() && ready(next));
                 call.resolve(result);
-            } catch (Exception e) { call.reject("تعذر التحقق من التحديث. تحقق من الإنترنت وأعد المحاولة."); }
+            } catch (Exception e) {
+                android.util.Log.w("AlatheelUpdater", "Public update metadata check failed", e);
+                call.reject("تعذر التحقق من التحديث. تحقق من الإنترنت وأعد المحاولة.");
+            }
             finally { if (c != null) c.disconnect(); }
         });
     }
@@ -188,3 +191,4 @@ public class AppUpdaterPlugin extends Plugin {
         });
     }
 }
+

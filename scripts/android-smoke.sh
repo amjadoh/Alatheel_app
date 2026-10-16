@@ -13,7 +13,7 @@ echo no | avdmanager create avd --force --name alatheel-qa --package 'system-ima
 test -s "$ANDROID_AVD_HOME/alatheel-qa.ini"
 test -x "$ANDROID_HOME/emulator/emulator"
 "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx alatheel-qa
-"$ANDROID_HOME/emulator/emulator" -avd alatheel-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > android-qa/emulator.log 2>&1 &
+"$ANDROID_HOME/emulator/emulator" -avd alatheel-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -dns-server 8.8.8.8 > android-qa/emulator.log 2>&1 &
 EMULATOR_PID=$!
 trap 'kill "$EMULATOR_PID" 2>/dev/null || true' EXIT
 CONNECTED=false
@@ -43,8 +43,12 @@ adb shell dumpsys activity activities > android-qa/activities.txt
 grep -E 'mResumedActivity|topResumedActivity' android-qa/activities.txt | grep -Fq com.alatheel.stable
 adb shell uiautomator dump /sdcard/alatheel-window.xml
 adb pull /sdcard/alatheel-window.xml android-qa/window.xml
+adb logcat -d -s AlatheelUpdater:V Capacitor/Console:V > android-qa/app-log.txt
 adb exec-out screencap -p > android-qa/launch.png
 adb logcat -d -b crash > android-qa/crash.txt
 if grep -Fq 'Process: com.alatheel.stable' android-qa/crash.txt; then cat android-qa/crash.txt; exit 1; fi
 grep -Fq 'com.alatheel.stable' android-qa/window.xml
-printf 'Signed APK installed and launched without an Android crash. Authentication was not attempted.\n' > android-qa/result.txt
+if grep -Fq 'تعذر التحقق' android-qa/window.xml; then cat android-qa/app-log.txt; exit 1; fi
+grep -Eq 'Google|قوقل' android-qa/window.xml
+printf 'Signed APK installed and reached the Google sign-in screen without an Android crash. Authentication was not attempted.\n' > android-qa/result.txt
+
