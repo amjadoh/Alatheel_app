@@ -1594,9 +1594,16 @@ export default function App() {
                         <div className="spread">
                           <h2>{h.name}</h2>
                           <span
-                            className={`pill ${h.dueDate < today() ? "red" : ""}`}
+                            className={`pill ${horseAccount(s, h, today()).items.some((x) => x.remaining > 0 && x.dueDate < today()) ? "red" : ""}`}
                           >
-                            {h.dueDate < today() ? "متأخر" : "مستحق"}
+                            {horseAccount(s, h, today()).outstanding === 0
+                              ? "مسدد"
+                              : horseAccount(s, h, today()).items.some(
+                                    (x) =>
+                                      x.remaining > 0 && x.dueDate < today(),
+                                  )
+                                ? "متأخر"
+                                : "مستحق"}
                           </span>
                         </div>
                         <p className="muted">
