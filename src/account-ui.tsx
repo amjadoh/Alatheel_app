@@ -64,7 +64,7 @@ export function HorseAccount({
   state: State;
   horse: Row;
   canPay: boolean;
-  onPay: (data: Record<string, any>) => Promise<void>;
+  onPay: (data: Record<string, any>, requestId: string) => Promise<void>;
 }) {
   const today = businessDay(new Date().toISOString()),
     [view, setView] = useState<"statement" | "pay">("statement"),
@@ -77,6 +77,7 @@ export function HorseAccount({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const saving = useRef(false);
+  const receiptRequest = useRef<string | null>(null);
   const account = horseAccount(state, horse, today),
     month = paidAt.slice(0, 7),
     validDate = /^\d{4}-\d{2}-\d{2}$/.test(paidAt),
@@ -134,11 +135,16 @@ export function HorseAccount({
     setBusy(true);
     setError("");
     try {
-      await onPay({
-        ...selectedData,
-        amount: chargedAmount,
-        expectedRevision: accountRevision(state, horse),
-      });
+      receiptRequest.current ||= crypto.randomUUID();
+      await onPay(
+        {
+          ...selectedData,
+          amount: chargedAmount,
+          expectedRevision: accountRevision(state, horse),
+        },
+        receiptRequest.current,
+      );
+      receiptRequest.current = null;
       setView("statement");
       setAmount("");
       setPeriods([]);

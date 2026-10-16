@@ -113,6 +113,7 @@ if (
   );
 }
 let emit: (s: State, a: Actor | null, error?: string) => void = () => {};
+let lostReceiptAcknowledgement = false;
 export const inspectQA = () => structuredClone(s);
 (window as any).__alatheelQA = inspectQA;
 export function connect(fn: typeof emit) {
@@ -130,6 +131,15 @@ export async function execute(c: any) {
     "2026-10-16T12:00:00Z",
   );
   emit(s, a);
+  if (
+    new URLSearchParams(location.search).get("scenario") ===
+      "ambiguous-receipt" &&
+    c.action === "income.pay" &&
+    !lostReceiptAcknowledgement
+  ) {
+    lostReceiptAcknowledgement = true;
+    throw new Error("انقطع تأكيد الشبكة التجريبي بعد حفظ السند");
+  }
 }
 export async function login() {
   emit(s, a);

@@ -2544,12 +2544,13 @@ export default function App() {
             state={s}
             horse={s.horses.find((h) => h.id === accountHorseId)!}
             canPay={isStaff && a?.dataReady !== false}
-            onPay={async (data) => {
+            onPay={async (data, requestId) => {
               setBusy(true);
               try {
                 await execute({
                   action: "income.pay",
                   id: accountHorseId,
+                  requestId,
                   data,
                 });
                 setToast("تم تسجيل الدفعة وتوزيعها على الاستحقاقات");

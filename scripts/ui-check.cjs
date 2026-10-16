@@ -350,11 +350,9 @@ async function main() {
         .getByRole("button", { name: "المصروفات", exact: true })
         .click();
       await page.getByLabel("شهر المصروف", { exact: true }).fill("2026-09");
-      const salary = page
-        .locator("section.card")
-        .filter({
-          has: page.getByRole("heading", { name: "راتب العامل", exact: true }),
-        });
+      const salary = page.locator("section.card").filter({
+        has: page.getByRole("heading", { name: "راتب العامل", exact: true }),
+      });
       await salary.waitFor();
       assert.equal(
         await page
@@ -389,9 +387,7 @@ async function main() {
         "1800",
       );
       await form.getByLabel(/المبلغ المدفوع/).fill("600");
-      await form
-        .getByLabel(/تاريخ سداد المصروف/)
-        .fill("2026-10-16");
+      await form.getByLabel(/تاريخ سداد المصروف/).fill("2026-10-16");
       await form
         .getByRole("button", { name: "حفظ ومتابعة", exact: true })
         .click();
@@ -408,6 +404,64 @@ async function main() {
       await page.screenshot({
         path: path.join(output, "closed-expense-settlement.png"),
       });
+      await context.close();
+    },
+  );
+  await check(
+    "Retrying after a saved receipt loses its network acknowledgement cannot collect the same amount twice",
+    async () => {
+      const context = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      await context.route("**/*", (route) =>
+        new URL(route.request().url()).origin === base
+          ? route.continue()
+          : route.abort(),
+      );
+      const page = await context.newPage();
+      page.on("pageerror", (e) => report.errors.push(e.message));
+      await page.clock.install({ time: new Date("2026-10-16T12:00:00Z") });
+      await page.goto(base + "/tests/ui/app.html?scenario=ambiguous-receipt");
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "إغلاق", exact: true })
+        .click();
+      await page
+        .getByRole("navigation", { name: "التنقل الرئيسي" })
+        .getByRole("button", { name: "التحصيل", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "كشف الحساب وتسجيل دفعة", exact: true })
+        .click();
+      const account = page.getByRole("dialog", {
+        name: "كشف حساب الخيل",
+        exact: true,
+      });
+      await account
+        .getByRole("button", { name: "تسجيل دفعة", exact: true })
+        .click();
+      await account
+        .getByLabel("المبلغ المستلم (ريال)", { exact: true })
+        .fill("200");
+      await account
+        .getByRole("button", { name: "تأكيد استلام المبلغ", exact: true })
+        .click();
+      await account
+        .getByRole("alert")
+        .filter({ hasText: "انقطع تأكيد الشبكة" })
+        .waitFor();
+      assert.equal((await snapshot(page)).income.length, 1);
+      await account
+        .getByRole("button", { name: "تأكيد استلام المبلغ", exact: true })
+        .click();
+      await account
+        .getByRole("button", { name: "تسجيل دفعة", exact: true })
+        .waitFor();
+      const state = await snapshot(page);
+      assert.equal(state.income.length, 1);
+      assert.equal(state.income[0].amount, 200);
       await context.close();
     },
   );
