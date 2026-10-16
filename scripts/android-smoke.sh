@@ -4,10 +4,17 @@ mkdir -p android-qa
 test -e /dev/kvm
 sudo chmod 666 /dev/kvm
 echo no | avdmanager create avd --force --name alatheel-qa --package 'system-images;android-35;google_apis;x86_64'
-emulator -avd alatheel-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > android-qa/emulator.log 2>&1 &
+test -x "$ANDROID_HOME/emulator/emulator"
+"$ANDROID_HOME/emulator/emulator" -avd alatheel-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > android-qa/emulator.log 2>&1 &
 EMULATOR_PID=$!
 trap 'kill "$EMULATOR_PID" 2>/dev/null || true' EXIT
-timeout 240 adb wait-for-device
+CONNECTED=false
+for i in $(seq 1 120); do
+  if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then cat android-qa/emulator.log; exit 1; fi
+  if test "$(adb get-state 2>/dev/null | tr -d '\r')" = device; then CONNECTED=true; break; fi
+  sleep 2
+done
+test "$CONNECTED" = true
 BOOTED=false
 for i in $(seq 1 120); do
   if test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1; then BOOTED=true; break; fi
