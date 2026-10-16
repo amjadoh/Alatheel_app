@@ -137,9 +137,9 @@ service cloud.firestore {
     match /horses/{horseId} {
       allow get: if isEmployee() || isHorseOwner(existing());
       allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
-      allow create: if isEmployee() && isValidHorse(incoming()) && !incoming().keys().hasAny(['accountVersion','accountAnchor','accountCycles','accountExtras']);
-      allow update: if isEmployee() && isValidHorse(incoming()) && !incoming().diff(existing()).affectedKeys().hasAny(['accountVersion','accountAnchor','accountCycles','accountExtras']) && (existing().get('accountVersion',0) != 1 || !incoming().diff(existing()).affectedKeys().hasAny(['dueDate','boardingFee','ownerId']));
-      allow delete: if isAdmin() && existing().get('accountVersion',0) != 1;
+      allow create: if isEmployee() && isValidHorse(incoming()) && !incoming().keys().hasAny(['accountVersion','accountAnchor','accountCycles','accountExtras','boardingHistory','billingPolicy','stayPeriods']);
+      allow update: if isEmployee() && isValidHorse(incoming()) && !incoming().diff(existing()).affectedKeys().hasAny(['accountVersion','accountAnchor','accountCycles','accountExtras','boardingHistory','billingPolicy','stayPeriods']) && (existing().get('accountVersion',0) != 1 || !incoming().diff(existing()).affectedKeys().hasAny(['dueDate','boardingFee','ownerId']));
+      allow delete: if isAdmin() && existing().get('accountVersion',0) != 1 && !existing().keys().hasAny(['boardingHistory']);
     }
 
     // 3. Meal Types & Inventory
@@ -183,6 +183,10 @@ service cloud.firestore {
     }
     // 4. Settings Collection (Stable Identity)
     match /expensePayments/{paymentId} {
+      allow read: if isEmployee();
+      allow write: if false;
+    }
+    match /financialPeriods/{periodId} {
       allow read: if isEmployee();
       allow write: if false;
     }

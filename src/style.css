@@ -416,6 +416,89 @@ svg {
   font-weight: 800;
   min-height: 44px;
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.account-menu-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.account-avatar {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--gold);
+  font-weight: 800;
+}
+.account-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.account-short-name {
+  max-width: 70px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  font-size: 11px;
+}
+.account-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  background: transparent;
+  border: 0;
+}
+.account-popover {
+  position: absolute;
+  top: max(79px, calc(env(safe-area-inset-top) + 70px));
+  left: 14px;
+  width: 260px;
+  max-width: calc(100% - 28px);
+  z-index: 46;
+  padding: 16px;
+  border-radius: 18px;
+  background: #fffdf7;
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 30px #17191622;
+}
+.account-popover > strong,
+.account-popover > small {
+  display: block;
+  margin-bottom: 6px;
+}
+.account-popover > small {
+  color: var(--muted);
+}
+.account-popover > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 0;
+  text-align: right;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
 .app > main {
   flex: 1;
   overflow-y: auto;
@@ -1102,7 +1185,12 @@ dialog::backdrop {
   background: #11150ecc;
   backdrop-filter: blur(3px);
 }
+dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
 .modal-heading {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1114,12 +1202,45 @@ dialog::backdrop {
   font-size: 18px;
 }
 .modal-body {
+  min-height: 0;
+  overscroll-behavior: contain;
   padding: 20px 22px max(25px, env(safe-area-inset-bottom));
   overflow: auto;
   max-height: calc(92dvh - 73px);
 }
 .modal-body > p {
   font-size: 13px;
+}
+.release-notes {
+  direction: rtl;
+  text-align: right;
+  font-size: 14px;
+  line-height: 2;
+  overflow-wrap: anywhere;
+}
+.release-notes > section {
+  padding-block: 14px;
+  border-block-end: 1px solid var(--line);
+}
+.release-notes > section:first-child {
+  padding-block-start: 4px;
+}
+.release-notes > section:last-child {
+  border: 0;
+}
+.release-notes h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--gold);
+}
+.release-notes ul {
+  margin: 0;
+  padding-inline-start: 20px;
+  padding-inline-end: 0;
+}
+.release-notes li + li {
+  margin-block-start: 8px;
 }
 .field {
   display: flex;

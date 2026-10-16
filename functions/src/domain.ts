@@ -1,9 +1,22 @@
 /** Shared, deterministic rules; the server is the authority for every write. */
 import { feedingMeasure, expenseFeedMeal } from "./feeding";
 import { monthlyExpense } from "./estimates";
-import { expensePaid, financialSummary } from "./finance";
+import {
+  expensePaid,
+  expensePlan,
+  financialSummary,
+  cashCategory,
+} from "./finance";
 import { businessDay } from "./dates";
 import { horseAccount, planPayment, accountRevision } from "./accounts";
+import {
+  financialActions,
+  closePeriods,
+  refreshPeriod,
+  assertOpenPeriod,
+} from "./periods";
+import { boardingTerms } from "./boarding";
+import { itemKey, similarItems } from "./inventory";
 export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
@@ -16,6 +29,7 @@ export const collections = [
   "expenses",
   "expensePayments",
   "financialReports",
+  "financialPeriods",
   "income",
   "activities",
   "settings",
@@ -28,6 +42,7 @@ export type Actor = {
   displayName: string;
   disabled?: boolean;
   ownerRecordId?: string;
+  photoURL?: string;
   dataReady?: boolean;
 };
 export type Command = {
@@ -46,6 +61,7 @@ export const emptyState = (): State => ({
   expenses: [],
   expensePayments: [],
   financialReports: [],
+  financialPeriods: [],
   income: [],
   activities: [],
   settings: [],
@@ -175,7 +191,10 @@ export function applyCommand(
     return s;
   if (!["request.create", "request.accept", "profile.save"].includes(c.action))
     ensure(staff(a), "هذه العملية متاحة للإدارة والموظف فقط");
+  if (financialActions.has(c.action)) closePeriods(s, today);
   switch (c.action) {
+    case "finance.rollover":
+      break;
     case "owner.save": {
       const old = c.id ? find(s, "owners", id) : null;
       const email = text(d.email, 200).toLowerCase();
@@ -279,6 +298,7 @@ export function applyCommand(
       const owner =
         s.owners.find((o) => o.id === d.ownerId) || find(s, "users", d.ownerId);
       ensure(!owner.disabled && !owner.deleted, "سجل المالك معطل أو محذوف");
+      if (!old) assertOpenPeriod(s, date(d.entryDate));
       ensure(
         ["boarding", "boarding_breeding", "private"].includes(d.status),
         "حالة الخيل غير صحيحة",
@@ -318,17 +338,58 @@ export function applyCommand(
         );
         old.accountCycles = horseAccount(s, old, today)
           .items.filter((x) => x.kind === "boarding")
-          .map((x) => ({ dueDate: x.dueDate, amount: x.amount }));
+          .map((x) => ({
+            dueDate: x.dueDate,
+            amount: x.amount,
+            baseFee: x.baseFee ?? boardingTerms(old, x.dueDate.slice(0, 7)).fee,
+            billingPolicy:
+              x.billingPolicy ||
+              boardingTerms(old, x.dueDate.slice(0, 7)).policy,
+          }));
       }
+      const billingPolicy =
+        d.billingPolicy || old?.billingPolicy || "full_month";
+      ensure(
+        ["full_month", "per_day"].includes(billingPolicy),
+        "حدد طريقة احتساب الإيواء",
+      );
+      if (old && d.entryDate !== old.entryDate) {
+        assertOpenPeriod(s, old.entryDate);
+        ensure(
+          !old.accountVersion,
+          "تاريخ الدخول مرتبط بكشف الحساب ولا يمكن تغييره",
+        );
+      }
+      const month = today.slice(0, 7),
+        history = [...(old?.boardingHistory || [])];
+      if (old && !history.length)
+        history.push({
+          month: "0000-00",
+          fee: old.boardingFee || 0,
+          policy: old.billingPolicy || "full_month",
+        });
+      const boardingHistory = history.filter((x) => x.month !== month);
+      boardingHistory.push({
+        month,
+        fee: num(d.boardingFee, "الرسوم"),
+        policy: billingPolicy,
+      });
       put(s, "horses", {
         ...old,
+        billingPolicy,
+        boardingHistory,
         id,
         name: required(d.name, "اسم الخيل"),
         ownerId: owner.id,
         ownerName: owner.displayName,
         registrationNum: text(d.registrationNum),
         entryDate: date(d.entryDate),
-        dueDate: d.status === "private" ? "" : date(d.dueDate),
+        dueDate:
+          d.status === "private"
+            ? ""
+            : !old && billingPolicy === "per_day"
+              ? date(d.entryDate)
+              : date(d.dueDate),
         status: d.status,
         boardingFee: num(d.boardingFee, "الرسوم"),
         feeding,
@@ -347,6 +408,16 @@ export function applyCommand(
         ["customer_request", "death"].includes(d.exitReason),
         "حدد سبب الخروج",
       );
+      const exit = date(d.exitDate);
+      ensure(
+        exit <= today && (!h.entryDate || exit >= h.entryDate),
+        "الخروج يجب أن يكون بين الدخول واليوم",
+      );
+      assertOpenPeriod(s, exit);
+      const stays = h.stayPeriods || [{ entryDate: h.entryDate || exit }];
+      ensure(!stays[stays.length - 1].exitDate, "فترة الإقامة مغلقة بالفعل");
+      stays[stays.length - 1].exitDate = exit;
+      h.stayPeriods = stays;
       h.previousStatus = h.status;
       Object.assign(h, {
         status: "archived",
@@ -360,6 +431,18 @@ export function applyCommand(
     case "horse.restore": {
       const h = find(s, "horses", id);
       ensure(h.status === "archived", "الخيل غير مؤرشف");
+      const stays = h.stayPeriods || [
+        {
+          entryDate: h.entryDate || businessDay(h.exitDate),
+          exitDate: businessDay(h.exitDate),
+        },
+      ];
+      ensure(
+        today >= businessDay(h.exitDate),
+        "تاريخ الخروج المسجل بعد اليوم؛ صحح التاريخ قبل الاستعادة",
+      );
+      stays.push({ entryDate: today });
+      h.stayPeriods = stays;
       Object.assign(h, {
         status: h.previousStatus || "boarding",
         exitDate: null,
@@ -371,10 +454,25 @@ export function applyCommand(
     }
     case "meal.save": {
       const old = c.id ? find(s, "mealTypes", id) : null;
+      const name = required(d.name, "اسم الصنف");
+      ensure(
+        !s.mealTypes.some(
+          (m) =>
+            m.id !== id &&
+            itemKey(m.name) === itemKey(name) &&
+            itemKey(m.unit) === itemKey(d.unit),
+        ),
+        "هذا الصنف موجود؛ اختره ثم استخدم شراء وإضافة للمخزون",
+      );
+      const similar = similarItems(s.mealTypes, name, id);
+      ensure(
+        !similar.length || d.confirmSimilar === true,
+        `يوجد صنف مشابه: ${similar.map((m) => m.name).join("، ")}. راجع الأصناف أو أكد أنه صنف مختلف`,
+      );
       const measure = feedingMeasure({ ...old, ...d });
       put(s, "mealTypes", {
         id,
-        name: required(d.name, "اسم الصنف"),
+        name,
         unit: required(d.unit, "الوحدة"),
         pricePerUnit: num(d.pricePerUnit, "سعر الوحدة"),
         feedingUnit: d.feedingUnit
@@ -387,6 +485,91 @@ export function applyCommand(
         ),
         minThreshold: num(d.minThreshold, "حد التنبيه"),
         currentStock: old?.currentStock ?? num(d.currentStock, "الرصيد"),
+      });
+      break;
+    }
+    case "stock.purchase": {
+      const m = find(s, "mealTypes", id),
+        amount = num(d.amount, "كمية الشراء", 0.01);
+      const total = money(num(d.total, "إجمالي المبلغ المدفوع", 0.01)),
+        paidAt = date(d.paidAt);
+      ensure(total <= 1000000, "قيمة الشراء تتجاوز حد العملية");
+      ensure(paidAt <= today, "لا يمكن تسجيل شراء بتاريخ مستقبلي");
+      assertOpenPeriod(s, paidAt);
+      ensure(
+        ["bank", "cash", "card", "other"].includes(d.method),
+        "حدد طريقة الدفع",
+      );
+      const expenseId = c.requestId + "_purchase",
+        paymentId = c.requestId + "_payment";
+      ensure(
+        !s.expenses.some((e) => e.id === expenseId) &&
+          !s.expensePayments.some((p) => p.id === paymentId),
+        "عملية الشراء مسجلة بالفعل",
+      );
+      m.currentStock = money(Number(m.currentStock || 0) + amount);
+      // Latest purchase rate is used only for the open month's estimate; the invoice keeps its exact total.
+      m.pricePerUnit = Number((total / amount).toFixed(8));
+      const purchase = {
+        stockTransactionId: c.requestId,
+        mealTypeId: m.id,
+        mealName: m.name,
+        quantity: amount,
+        unit: m.unit,
+        unitPrice: m.pricePerUnit,
+      };
+      s.expenses.push({
+        id: expenseId,
+        name: "شراء " + m.name,
+        cost: total,
+        frequency: "once",
+        expenseKind: "feed_purchase",
+        expenseCategory: "other",
+        allocationScope: "all_active",
+        chargedTo: "stable",
+        horseIds: [],
+        allocations: {},
+        collectedHorseIds: [],
+        incurredAt: paidAt,
+        lockedForPayments: true,
+        ...purchase,
+        createdAt: now,
+        updatedAt: now,
+      });
+      s.expensePayments.push({
+        id: paymentId,
+        expenseId,
+        expenseName: "شراء " + m.name,
+        amount: total,
+        period: paidAt.slice(0, 7),
+        paidAt,
+        expenseKind: "feed_purchase",
+        cashCategory: "inventory",
+        status: "paid",
+        method: d.method,
+        notes: text(d.notes),
+        stockTransactionId: c.requestId,
+        performedBy: a.uid,
+        createdAt: now,
+      });
+      s.inventoryTransactions.push({
+        id: c.requestId,
+        mealTypeId: m.id,
+        mealName: m.name,
+        type: "add",
+        movementKind: "purchase",
+        amount,
+        total,
+        paidAt,
+        method: d.method,
+        expenseId,
+        paymentId,
+        unitPrice: m.pricePerUnit,
+        unit: m.unit,
+        reason: text(d.notes) || "شراء مدفوع",
+        balance: m.currentStock,
+        performedBy: a.uid,
+        createdAt: now,
       });
       break;
     }
@@ -425,6 +608,18 @@ export function applyCommand(
     }
     case "expense.save": {
       const old = c.id ? find(s, "expenses", id) : null;
+      if (old?.frequency === "once")
+        assertOpenPeriod(s, businessDay(old.incurredAt || old.createdAt));
+      if (d.frequency === "once")
+        assertOpenPeriod(
+          s,
+          date(
+            d.incurredAt ||
+              old?.incurredAt ||
+              businessDay(old?.createdAt) ||
+              today,
+          ),
+        );
       ensure(
         !old || !s.expensePayments.some((p) => p.expenseId === id),
         "المصروف مرتبط بسداد؛ أنشئ مصروفًا جديدًا للتغييرات",
@@ -453,6 +648,16 @@ export function applyCommand(
       );
       ids.forEach((i) => find(s, "horses", i));
       const cost = num(d.cost, "التكلفة");
+      const expenseCategory =
+        d.expenseCategory ||
+        old?.expenseCategory ||
+        (cashCategory({ ...d, expenseKind: "operating" }) === "salary"
+          ? "salary"
+          : "other");
+      ensure(
+        ["salary", "other"].includes(expenseCategory),
+        "حدد تصنيف المصروف",
+      );
       const matchedFeed = expenseFeedMeal(d, s.mealTypes);
       const expenseKind =
         d.expenseKind || (matchedFeed ? "feed_purchase" : "operating");
@@ -484,6 +689,7 @@ export function applyCommand(
         frequency: d.frequency,
         allocationScope,
         expenseKind,
+        expenseCategory,
         chargedTo,
         startMonth,
         incurredAt:
@@ -506,6 +712,14 @@ export function applyCommand(
     }
     case "expense.delete":
       ensure(a.role === "admin", "حذف المصروف للمدير فقط");
+      if (find(s, "expenses", id).frequency === "once")
+        assertOpenPeriod(
+          s,
+          businessDay(
+            find(s, "expenses", id).incurredAt ||
+              find(s, "expenses", id).createdAt,
+          ),
+        );
       ensure(
         !s.expensePayments.some((p) => p.expenseId === id),
         "المصروف مرتبط بسجلات سداد ولا يمكن حذفه",
@@ -519,8 +733,22 @@ export function applyCommand(
       break;
     case "expense.pay": {
       const e = find(s, "expenses", id);
+      const meal = expenseFeedMeal(e, s.mealTypes);
+      ensure(
+        !(
+          meal &&
+          e.frequency !== "once" &&
+          s.expenses.some(
+            (x) =>
+              x.stockTransactionId &&
+              x.mealTypeId === meal.id &&
+              businessDay(x.incurredAt).slice(0, 7) === d.period,
+          )
+        ),
+        "شراء هذا الصنف يسجل ويسدد من المخزون؛ لا تسدد خطة الشراء مرة ثانية",
+      );
       const period = required(d.period, "شهر المصروف");
-      const planned = monthlyExpense(e, period);
+      const planned = expensePlan(s, e, period);
       const remaining = money(planned - expensePaid(s, e.id, period));
       ensure(remaining > 0, "هذا المصروف مسدد بالكامل لهذه الفترة");
       ensure(
@@ -533,6 +761,7 @@ export function applyCommand(
         "المبلغ يتجاوز المتبقي لهذه الفترة؛ سجل التكلفة الإضافية كمصروف مستقل",
       );
       const paidAt = date(d.paidAt);
+      assertOpenPeriod(s, paidAt);
       ensure(paidAt <= today, "لا يمكن تسجيل سداد بتاريخ مستقبلي");
       e.lockedForPayments = true;
       s.expensePayments.push({
@@ -542,7 +771,11 @@ export function applyCommand(
         amount,
         period,
         paidAt,
-        expenseKind: e.expenseKind || "operating",
+        expenseKind: meal ? "feed_purchase" : e.expenseKind || "operating",
+        cashCategory: cashCategory({
+          ...e,
+          expenseKind: meal ? "feed_purchase" : e.expenseKind,
+        }),
         status: "paid",
         notes: text(d.notes),
         performedBy: a.uid,
@@ -553,6 +786,11 @@ export function applyCommand(
     case "expense.payment.void": {
       ensure(a.role === "admin", "إلغاء السداد للمدير فقط");
       const p = find(s, "expensePayments", id);
+      ensure(
+        !p.stockTransactionId,
+        "سداد شراء المخزون مرتبط بفاتورته وحركته؛ لا يلغى من سداد المصروفات",
+      );
+      assertOpenPeriod(s, businessDay(p.paidAt));
       ensure(p.status !== "void", "تم إلغاء السداد سابقًا");
       p.status = "void";
       p.voidReason = required(d.reason, "سبب الإلغاء");
@@ -577,7 +815,7 @@ export function applyCommand(
         id: month,
         month,
         summary: JSON.parse(summaryText),
-        basis: "current_program_full_month",
+        basis: "month_configuration_and_stays",
         createdAt: now,
         createdBy: a.uid,
       });
@@ -599,16 +837,17 @@ export function applyCommand(
         "حدد نوع الدفعة",
       );
       const paidAt = date(d.paidAt);
+      assertOpenPeriod(s, paidAt);
       ensure(paidAt <= today, "لا يمكن تسجيل دفعة بتاريخ مستقبلي");
       ensure(
         !h.entryDate || paidAt >= h.entryDate,
-        "تاريخ الدفع يسبق دخول الخيل",
+        "تاريخ التحصيل يسبق دخول الخيل",
       );
       const amount = money(num(d.amount, "المبلغ المستلم", 0.01));
       ensure(amount <= 1000000, "المبلغ يتجاوز حد الدفعة");
       ensure(
         ["bank", "cash", "card", "other"].includes(d.method),
-        "حدد طريقة الدفع",
+        "حدد طريقة التحصيل",
       );
       ensure(
         Array.isArray(d.periods || []) && (d.periods || []).length <= 120,
@@ -618,7 +857,7 @@ export function applyCommand(
       if (d.paymentType === "monthly")
         ensure(
           plan.selectedBalance > 0 && amount === plan.selectedBalance,
-          "ادفع المتبقي من استحقاق الشهر المحدد من تاريخ الدفع",
+          "المبلغ يجب أن يساوي المتبقي من استحقاق الشهر المحدد من تاريخ التحصيل",
         );
       if (d.paymentType === "arrears") {
         ensure(
@@ -629,7 +868,7 @@ export function applyCommand(
                 /^\d{4}-(0[1-9]|1[0-2])$/.test(m) &&
                 m < paidAt.slice(0, 7),
             ),
-          "اختر أشهرًا سابقة لتاريخ الدفع",
+          "اختر أشهرًا سابقة لتاريخ التحصيل",
         );
         ensure(
           plan.selectedBalance > 0 && amount <= plan.selectedBalance,
@@ -641,7 +880,13 @@ export function applyCommand(
       h.accountVersion = 1;
       h.accountCycles = plan.account.items
         .filter((x) => x.kind === "boarding")
-        .map((x) => ({ dueDate: x.dueDate, amount: x.amount }));
+        .map((x) => ({
+          dueDate: x.dueDate,
+          amount: x.amount,
+          baseFee: x.baseFee ?? boardingTerms(h, x.dueDate.slice(0, 7)).fee,
+          billingPolicy:
+            x.billingPolicy || boardingTerms(h, x.dueDate.slice(0, 7)).policy,
+        }));
       s.income.push({
         id: c.requestId,
         horseId: h.id,
@@ -713,6 +958,10 @@ export function applyCommand(
         "هذا الخيل يستخدم كشف الحساب الجديد؛ حدّث التطبيق لتسجيل الدفعات",
       );
       ensure(
+        h.billingPolicy !== "per_day",
+        "الخيل يحتسب بالأيام؛ استخدم كشف الحساب الجديد لتسجيل الدفعة",
+      );
+      ensure(
         ["boarding", "boarding_breeding"].includes(h.status),
         "الخيل غير مشمول بالتحصيل",
       );
@@ -780,6 +1029,7 @@ export function applyCommand(
     default:
       throw new Error("عملية غير معروفة");
   }
+  if (financialActions.has(c.action)) refreshPeriod(s, today);
   s.activities.push({
     id: c.requestId,
     action: c.action,

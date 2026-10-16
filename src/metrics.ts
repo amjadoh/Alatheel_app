@@ -4,6 +4,7 @@ export {
   monthlyExpense,
   expenseIsShared,
   isFeedPurchase,
+  coveredFeedPlan,
 } from "../functions/src/estimates";
 export {
   feedingMeasure,

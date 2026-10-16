@@ -1,8 +1,10 @@
+import { TERMS } from "./terms";
 import { useEffect, useRef, useState, ReactNode } from "react";
 import {
   LayoutDashboard,
   Package,
   Wallet,
+  Receipt,
   Users,
   Plus,
   ArrowUpLeft,
@@ -47,6 +49,7 @@ import {
   monthlyExpense,
   expenseIsShared,
   isFeedPurchase,
+  coveredFeedPlan,
   expenseFeedMeal,
 } from "./metrics";
 import { exportExcel, exportPdf } from "./export";
@@ -56,9 +59,20 @@ import {
   HorseFinancialPanel,
   HorsePhoto,
 } from "./finance-ui";
-import { horseFinance, expensePaid } from "../functions/src/finance";
+import {
+  horseFinance,
+  expensePaid,
+  expensePlan,
+} from "../functions/src/finance";
 import { prepareHorsePhoto } from "./horse-photo";
 import { businessDay } from "../functions/src/dates";
+import { similarItems } from "../functions/src/inventory";
+import {
+  RELEASE_VERSION,
+  RELEASE_NOTES,
+  needsReleaseNotes,
+  markReleaseNotesRead,
+} from "./release-notes";
 type Field = {
   name: string;
   label: string;
@@ -77,6 +91,8 @@ type Form = {
   feeding?: boolean;
   horses?: boolean;
   horsePhoto?: boolean;
+  inventoryItem?: string;
+  inventoryDefinition?: boolean;
   note?: string;
 };
 const roles: Record<string, string> = {
@@ -160,8 +176,18 @@ export default function App() {
     [month, setMonth] = useState(today().slice(0, 7)),
     [incomeTab, setIncomeTab] = useState("pending"),
     [accountHorseId, setAccountHorseId] = useState<string | null>(null),
+    [releaseOpen, setReleaseOpen] = useState(false),
     [loginOpen, setLoginOpen] = useState(false),
+    [accountMenuOpen, setAccountMenuOpen] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
+  const closeRelease = () => {
+    markReleaseNotesRead(localStorage);
+    setReleaseOpen(false);
+  };
+  useEffect(() => {
+    if (a?.dataReady) setReleaseOpen(needsReleaseNotes(localStorage));
+    else if (!a) setReleaseOpen(false);
+  }, [a?.uid, a?.dataReady]);
   const mainRef = useRef<HTMLElement>(null),
     lock = useRef(false),
     prevUid = useRef<string | null>(null);
@@ -178,6 +204,7 @@ export default function App() {
           setSearch("");
           setLoginOpen(false);
           setAccountHorseId(null);
+          setAccountMenuOpen(false);
           prevUid.current = actor?.uid || null;
         }
       }),
@@ -200,7 +227,9 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const handle = NativeApp.addListener("backButton", () => {
-      if (accountHorseId) setAccountHorseId(null);
+      if (releaseOpen) closeRelease();
+      else if (accountMenuOpen) setAccountMenuOpen(false);
+      else if (accountHorseId) setAccountHorseId(null);
       else if (form) setForm(null);
       else if (detail) setDetail(null);
       else if (tab !== "dashboard") setTab("dashboard");
@@ -209,7 +238,7 @@ export default function App() {
     return () => {
       void handle.then((h) => h.remove());
     };
-  }, [form, detail, tab, accountHorseId]);
+  }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen]);
   const isStaff = !!a && staff(a),
     isAdmin = a?.role === "admin",
     name = s.settings[0]?.stableName || "إسطبل الأثيل",
@@ -220,6 +249,7 @@ export default function App() {
         fields.some((k) => String(r[k] || "").includes(search)),
       );
   const go = (page: string) => {
+    setAccountMenuOpen(false);
     setTab(page);
     setSearch("");
     mainRef.current?.scrollTo({ top: 0 });
@@ -358,25 +388,37 @@ export default function App() {
           min: 0,
           required: true,
         },
+        {
+          name: "billingPolicy",
+          label: "احتساب الإيواء في شهر الدخول والخروج",
+          options: [
+            ["full_month", "شهر كامل"],
+            ["per_day", "بالأيام الفعلية (رسوم الشهر ÷ أيامه × أيام الإقامة)"],
+          ],
+        },
         { name: "registrationNum", label: "رقم التسجيل" },
         { name: "notes", label: "ملاحظات", type: "textarea" },
       ],
-      values: h || {
-        ownerId: "",
-        status: "boarding",
-        entryDate: today(),
-        dueDate: nextMonth(today()),
-        boardingFee: 0,
-        feeding: [],
-      },
+      values: h
+        ? { ...h, billingPolicy: h.billingPolicy || "full_month" }
+        : {
+            ownerId: "",
+            status: "boarding",
+            entryDate: today(),
+            dueDate: nextMonth(today()),
+            boardingFee: 0,
+            billingPolicy: "full_month",
+            feeding: [],
+          },
       feeding: true,
       horsePhoto: true,
-      note: "يسجل المدير الخيل مباشرة بدون موافقة المالك أو دعوته. لإضافة مالك جديد استخدم زر «إضافة مالك» في شاشة الخيل.",
+      note: "رسوم الإيواء شهرية؛ خيار الأيام يشمل يومي الدخول والخروج. التغذية اليومية تحسب لأيام الإقامة، والتغذية بعدد مرات شهري توزع بنسبة أيام الإقامة. تعديل الشهر الجاري لا يغير الأشهر المغلقة. الحفظ لا يرسل دعوة.",
       submit: (d) => execute({ action: "horse.save", id: h?.id, data: d }),
     });
   const mealForm = (m?: Row) =>
     setForm({
-      title: m ? "تعديل صنف" : "صنف جديد",
+      inventoryDefinition: true,
+      title: m ? "تعديل صنف" : TERMS.registerItem,
       fields: [
         { name: "name", label: "اسم الصنف", required: true },
         {
@@ -410,17 +452,6 @@ export default function App() {
           min: 0,
           required: true,
         },
-        ...(!m
-          ? [
-              {
-                name: "currentStock",
-                label: "الرصيد الافتتاحي",
-                type: "number",
-                min: 0,
-                required: true,
-              },
-            ]
-          : []),
       ],
       values: m
         ? {
@@ -436,14 +467,73 @@ export default function App() {
             minThreshold: 10,
             currentStock: 0,
           },
-      submit: (d) => execute({ action: "meal.save", id: m?.id, data: d }),
+      submit: (d) =>
+        execute({
+          action: "meal.save",
+          id: m?.id,
+          data: { ...d, currentStock: m?.currentStock || 0 },
+        }),
       note: m
-        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. مثال: كيس 40 كجم بسعر 90 ريالًا = 2.25 ريال للكجم. الرصيد وحركاته بوحدة الشراء؛ لتغيير الرصيد استخدم إضافة أو صرف."
-        : "حدد وحدة الشراء ووحدة التغذية: كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم. للربطة الكاملة كوحدة تغذية اكتب ربطة والعدد 1.",
+        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. مثال: كيس 40 كجم بسعر 90 ريالًا = 2.25 ريال للكجم. الرصيد وحركاته بوحدة الشراء؛ لتغيير الرصيد استخدم «تصحيح زيادة رصيد» أو «صرف من المخزون»."
+        : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «شراء وإضافة». لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
+    });
+  const purchase = (m: Row) =>
+    setForm({
+      title: `شراء وإضافة · ${m.name}`,
+      inventoryItem: m.id,
+      fields: [
+        {
+          name: "amount",
+          label: `الكمية المشتراة (${m.unit})`,
+          type: "number",
+          min: 0.01,
+          required: true,
+        },
+        {
+          name: "total",
+          label: "إجمالي المبلغ المدفوع (ريال)",
+          type: "number",
+          min: 0.01,
+          max: 1000000,
+          required: true,
+        },
+        {
+          name: "paidAt",
+          label: "تاريخ الشراء والسداد",
+          type: "date",
+          required: true,
+        },
+        {
+          name: "method",
+          label: TERMS.paymentMethod,
+          options: [
+            ["bank", "تحويل بنكي"],
+            ["cash", "نقدي"],
+            ["card", "شبكة"],
+            ["other", "أخرى"],
+          ],
+        },
+        { name: "notes", label: "مرجع الفاتورة أو ملاحظة", type: "textarea" },
+      ],
+      values: {
+        amount: 1,
+        total: m.pricePerUnit || "",
+        paidAt: today(),
+        method: "bank",
+        purchaseRequestId: crypto.randomUUID(),
+      },
+      note: "هذه عملية شراء مدفوعة: تزيد كمية الصنف نفسه وتسجل المصروف والسداد مرة واحدة. أدخل إجمالي ما دفعته للكمية كلها. لا تسجل الشراء مرة ثانية في المصروفات. سعر التقدير الحالي يتحدث إلى سعر هذا الشراء؛ الأشهر المغلقة تحتفظ بأسعارها.",
+      submit: (d) =>
+        execute({
+          action: "stock.purchase",
+          id: m.id,
+          requestId: d.purchaseRequestId,
+          data: d,
+        }),
     });
   const move = (m: Row, type: string) =>
     setForm({
-      title: `${type === "add" ? "إضافة إلى" : "صرف من"} ${m.name}`,
+      title: `${type === "add" ? "تصحيح زيادة رصيد" : "صرف من"} ${m.name}`,
       fields: [
         {
           name: "amount",
@@ -453,10 +543,15 @@ export default function App() {
           ...(type === "remove" ? { max: m.currentStock } : {}),
           required: true,
         },
-        { name: "reason", label: "سبب الحركة", type: "textarea" },
+        {
+          name: "reason",
+          label: "سبب الحركة",
+          type: "textarea",
+          required: true,
+        },
       ],
       values: { amount: 1, type },
-      note: `الرصيد الحالي: ${money(m.currentStock)} ${m.unit}`,
+      note: `الرصيد الحالي: ${money(m.currentStock)} ${m.unit}. هذه حركة كمية فقط دون مبلغ مدفوع. للمشتريات استخدم شراء وإضافة.`,
       submit: (d) => execute({ action: "stock.move", id: m.id, data: d }),
     });
   const expenseForm = (e?: Row) =>
@@ -469,7 +564,9 @@ export default function App() {
           label: "نوع المصروف",
           options: [
             ["operating", "تشغيل (راتب، خدمات، وغيرها)"],
-            ["feed_purchase", "شراء علف — يظهر منفصلًا عن تكلفة الاستهلاك"],
+            ...(e
+              ? [["feed_purchase", "خطة شراء علف قديمة"] as [string, string]]
+              : []),
           ],
         },
         {
@@ -491,6 +588,15 @@ export default function App() {
         },
         { name: "frequency", label: "التكرار", options: frequencies },
         {
+          name: "expenseCategory",
+          label: "تصنيف المصروف",
+          when: ["expenseKind", "operating"],
+          options: [
+            ["salary", "رواتب العمال"],
+            ["other", "مصروفات أخرى"],
+          ],
+        },
+        {
           name: "incurredAt",
           label: "تاريخ المصروف",
           type: "date",
@@ -508,7 +614,7 @@ export default function App() {
           when: ["frequency", "once"],
           options: [
             ["stable", "على الإسطبل"],
-            ["owner", "يسترد من المالك — تشغيل على خيل محددة"],
+            ["owner", "يُسترد من المالك — مصروف لمرة واحدة على خيل محددة"],
           ],
         },
         {
@@ -523,6 +629,9 @@ export default function App() {
       values: e
         ? {
             ...e,
+            expenseCategory:
+              e.expenseCategory ||
+              (/راتب|رواتب|salary|payroll/i.test(e.name) ? "salary" : "other"),
             allocationScope: expenseIsShared(e) ? "all_active" : "selected",
             expenseKind: isFeedPurchase(s, e) ? "feed_purchase" : "operating",
             mealTypeId: expenseFeedMeal(e, s.mealTypes)?.id || "",
@@ -533,6 +642,7 @@ export default function App() {
           }
         : {
             cost: 0,
+            expenseCategory: "other",
             frequency: "monthly",
             startMonth: month,
             allocationScope: "all_active",
@@ -542,7 +652,7 @@ export default function App() {
             horseIds: [],
           },
       horses: true,
-      note: "قيمة المصروف تخص التكرار المختار. اليومي × أيام الشهر، والأسبوعي × الأيام ÷ 7. الشراء لا يكرر تكلفة استهلاك العلف. الحفظ يسجل التزامًا؛ سجل سداده بزر «تسجيل سداد». لاسترداد مصروف من المالك، اختر تشغيلًا لمرة واحدة على خيل محددة.",
+      note: "قيمة المصروف تخص التكرار المختار. اليومي × أيام الشهر، والأسبوعي × الأيام ÷ 7. الشراء لا يكرر تكلفة استهلاك العلف. الحفظ يسجل التزامًا؛ سجل سداده من المصروفات بزر «تسجيل سداد مصروف». لاسترداد مصروف من المالك، اختر تشغيلًا لمرة واحدة على خيل محددة.",
       submit: (d) =>
         execute({
           action: "expense.save",
@@ -556,7 +666,7 @@ export default function App() {
   const payExpense = (e: Row) => {
     const remaining =
       Math.round(
-        (monthlyExpense(e, month) - expensePaid(s, e.id, month)) * 100,
+        (expensePlan(s, e, month) - expensePaid(s, e.id, month)) * 100,
       ) / 100;
     setForm({
       title: `سداد ${e.name}`,
@@ -571,7 +681,7 @@ export default function App() {
         },
         {
           name: "paidAt",
-          label: "تاريخ الدفع الفعلي",
+          label: TERMS.expensePaymentDate,
           type: "date",
           required: true,
         },
@@ -583,7 +693,7 @@ export default function App() {
         period: month,
         expectedRemaining: remaining,
       },
-      note: `سداد يخص مصروف ${month}. المتبقي ${money(remaining)} ريال. يظهر في الحركة النقدية حسب تاريخ الدفع الفعلي.`,
+      note: `سداد يخص مصروف ${month}. المتبقي ${money(remaining)} ريال. يظهر في الحركة النقدية حسب تاريخ سداد المصروف.`,
       submit: (d) => execute({ action: "expense.pay", id: e.id, data: d }),
     });
   };
@@ -672,8 +782,14 @@ export default function App() {
             <dd>{h.entryDate}</dd>
             <dt>الاستحقاق</dt>
             <dd>{h.dueDate || "—"}</dd>
-            <dt>رسوم الإيواء</dt>
+            <dt>رسوم الإيواء الحالية</dt>
             <dd>{money(h.boardingFee)} ر.س</dd>
+            <dt>احتساب شهر الدخول والخروج</dt>
+            <dd>
+              {h.billingPolicy === "per_day"
+                ? "بالأيام الفعلية شاملًا الدخول والخروج"
+                : "شهر كامل"}
+            </dd>
           </dl>
           {isStaff && (
             <div className="notice">
@@ -702,9 +818,9 @@ export default function App() {
                 </p>
               ))}
               <small>
-                تقدير لشهر كامل حسب البرنامج والأسعار الحالية. الأسبوعي محسوب
-                بنسبة أيام الشهر ÷ 7. مشتريات العلف منفصلة لتجنب تكرار تكلفة
-                الاستهلاك.
+                تقدير أيام الإقامة؛ الشهر المغلق يستخدم بياناته المحفوظة.
+                الأسبوعي محسوب بنسبة أيام الشهر ÷ 7. مشتريات العلف منفصلة لتجنب
+                تكرار تكلفة الاستهلاك.
               </small>
               {c.missingFeed.map((item) => (
                 <p className="small" key={item}>
@@ -715,10 +831,12 @@ export default function App() {
             </div>
           )}
           <p>{h.notes || "لا توجد ملاحظات"}</p>
-          <Button kind="outline" onClick={() => collect(h)}>
-            كشف حساب الخيل وسجل المدفوعات
-          </Button>
-          <h3>برنامج التغذية</h3>
+          {h.status !== "private" && h.previousStatus !== "private" && (
+            <Button kind="outline" onClick={() => collect(h)}>
+              كشف حساب الخيل ودفعات المالك
+            </Button>
+          )}
+          <h3>برنامج التغذية الحالي</h3>
           {h.feeding?.length ? (
             h.feeding.map((f: any, i: number) => (
               <p key={i}>
@@ -779,7 +897,7 @@ export default function App() {
                           label: "من يتحمله؟",
                           options: [
                             ["stable", "الإسطبل"],
-                            ["owner", "يسترد من المالك"],
+                            ["owner", "يُسترد من المالك"],
                           ],
                         },
                       ],
@@ -834,6 +952,7 @@ export default function App() {
                           ],
                         },
                       ],
+                      note: "يُحفظ التاريخ المالي للخيل. يحتسب شهر الخروج وفق سياسة الإيواء المسجلة، ويشمل الحساب بالأيام يوم الخروج. لا يمكن تغيير شهر مغلق.",
                       values: {
                         exitDate: today(),
                         exitReason: "customer_request",
@@ -877,7 +996,7 @@ export default function App() {
         ["horses", "الخيل", HorseIcon],
         ["inventory", "المخزون", Package],
         ["income", "التحصيل", Wallet],
-        ["more", "المزيد", SlidersHorizontal],
+        ["expenses", "المصروفات", Receipt],
       ]
     : a?.role === "owner"
       ? [
@@ -902,7 +1021,7 @@ export default function App() {
     expenses: "المصروفات.",
     members: "الأعضاء.",
     owners: "الملاك.",
-    more: "إدارة حسابك.",
+    more: "المزيد.",
     activity: "سجل العمليات.",
   };
   const pending = s.registrationRequests.filter((r) =>
@@ -944,20 +1063,90 @@ export default function App() {
           </div>
         </div>
         {a ? (
-          <button
-            className="icon-button"
-            aria-label="التنبيهات"
-            onClick={() => go("activity")}
-          >
-            <Bell size={21} />
-            {pending.length > 0 && isStaff && <i />}
-          </button>
+          <div className="header-actions">
+            <button
+              className="icon-button"
+              aria-label="التنبيهات"
+              onClick={() => go("activity")}
+            >
+              <Bell size={21} />
+              {pending.length > 0 && isStaff && <i />}
+            </button>
+            <button
+              className="account-menu-toggle"
+              aria-label={`حساب ${a.displayName}، افتح المزيد`}
+              aria-expanded={accountMenuOpen}
+              onClick={() => setAccountMenuOpen(!accountMenuOpen)}
+            >
+              <span className="account-avatar">
+                <span>{a.displayName.trim().charAt(0)}</span>
+                {/^https:\/\//.test(a.photoURL || "") && (
+                  <img
+                    src={a.photoURL}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.hidden = true;
+                    }}
+                  />
+                )}
+              </span>
+              <span className="account-short-name">
+                {a.displayName.trim().split(/\s+/)[0]}
+              </span>
+            </button>
+          </div>
         ) : (
           <button className="header-login" onClick={() => setLoginOpen(true)}>
             دخول الأعضاء <ArrowUpLeft size={16} />
           </button>
         )}
       </header>
+      {accountMenuOpen && a && (
+        <>
+          <button
+            className="account-menu-backdrop"
+            aria-label="إغلاق قائمة الحساب"
+            onClick={() => setAccountMenuOpen(false)}
+          />
+          <nav
+            className="account-popover"
+            aria-label="المزيد وخيارات الحساب"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setAccountMenuOpen(false);
+            }}
+          >
+            <strong>{a.displayName}</strong>
+            <small>{roles[a.role]}</small>
+            {isStaff && (
+              <button onClick={() => go("owners")}>
+                <Users size={18} />
+                سجل الملاك
+              </button>
+            )}
+            {isStaff && (
+              <button onClick={() => go("requests")}>
+                <ClipboardList size={18} />
+                طلبات تسجيل الخيل
+              </button>
+            )}
+            {isAdmin && (
+              <button onClick={() => go("members")}>
+                <Users size={18} />
+                الأعضاء والصلاحيات
+              </button>
+            )}
+            <button onClick={() => go("activity")}>
+              <History size={18} />
+              سجل العمليات
+            </button>
+            <button onClick={() => go("more")}>
+              <SlidersHorizontal size={18} />
+              المزيد وبيانات حسابي
+            </button>
+          </nav>
+        </>
+      )}
       <main ref={mainRef}>
         {!a ? (
           <>
@@ -1037,7 +1226,7 @@ export default function App() {
                     onSave={() =>
                       confirm(
                         "حفظ تقرير الشهر",
-                        "يحفظ الأرقام الحالية وتفاصيل تكلفة كل خيل بتاريخ اليوم. لن تتغير هذه النسخة بتعديل الأسعار أو التسجيلات التالية. الحسابات تقديرية بالبرنامج الحالي لشهر كامل.",
+                        "يحفظ الأرقام الحالية وتفاصيل تكلفة كل خيل بتاريخ اليوم. لن تتغير هذه النسخة بتعديل الأسعار أو التسجيلات التالية. الحسابات وفق برنامج التغذية وأيام الإقامة وسياسة الإيواء المسجلة.",
                         () =>
                           execute({
                             action: "finance.snapshot",
@@ -1328,7 +1517,7 @@ export default function App() {
                                 ? `عجز ${money(Math.abs(f.margin))} ر.س${!f.complete ? " على الأقل · تكلفة ناقصة" : ""}`
                                 : !f.complete
                                   ? "التكلفة غير مكتملة"
-                                  : `الصافي المقدّر ${money(f.margin)} ر.س`}
+                                  : `نتيجة التشغيل المقدّرة ${money(f.margin)} ر.س`}
                           </p>
                         )}
                         <b
@@ -1466,7 +1655,7 @@ export default function App() {
                   "الرصيد والحركة في مكان واحد",
                   <button
                     className="round-add"
-                    aria-label="إضافة صنف"
+                    aria-label={TERMS.registerItem}
                     onClick={() => mealForm()}
                   >
                     <Plus />
@@ -1499,15 +1688,16 @@ export default function App() {
                       {money(feedingUnitPrice(m))} ر.س
                     </p>
                     <div className="actions">
-                      <Button kind="gold" onClick={() => move(m, "add")}>
-                        + إضافة
+                      <Button kind="gold" onClick={() => purchase(m)}>
+                        شراء وإضافة
                       </Button>
                       <Button kind="outline" onClick={() => move(m, "remove")}>
                         − صرف
                       </Button>
                     </div>
                     <div className="text-actions">
-                      <button onClick={() => mealForm(m)}>تعديل</button>
+                      <button onClick={() => mealForm(m)}>تعديل الصنف</button>
+                      <button onClick={() => move(m, "add")}>تصحيح رصيد</button>
                       <button
                         onClick={() =>
                           setDetail({
@@ -1520,10 +1710,20 @@ export default function App() {
                                   .map((t) => (
                                     <div className="record" key={t.id}>
                                       <b>
-                                        {t.type === "add" ? "إضافة" : "صرف"}{" "}
+                                        {t.movementKind === "purchase"
+                                          ? "شراء مدفوع"
+                                          : t.type === "add"
+                                            ? "تصحيح / إضافة"
+                                            : "صرف"}{" "}
                                         {t.amount}
                                       </b>
                                       <p>{t.reason || "دون ملاحظات"}</p>
+                                      {t.movementKind === "purchase" && (
+                                        <p>
+                                          إجمالي المدفوع: {money(t.total)} ر.س ·
+                                          تاريخ السداد {t.paidAt}
+                                        </p>
+                                      )}
                                       <small>
                                         {String(t.createdAt)
                                           .slice(0, 16)
@@ -1716,7 +1916,7 @@ export default function App() {
                     </p>
                     <p className="muted small">
                       {isFeedPurchase(s, e) ? "مشتريات العلف في" : "تكلفة"}{" "}
-                      {month}: {money(monthlyExpense(e, month))} ر.س{" "}
+                      {month}: {money(expensePlan(s, e, month))} ر.س{" "}
                       {expenseIsShared(e)
                         ? active.length
                           ? `÷ ${active.length} خيل نشطة`
@@ -1739,17 +1939,25 @@ export default function App() {
                         {money(
                           Math.max(
                             0,
-                            monthlyExpense(e, month) -
+                            expensePlan(s, e, month) -
                               expensePaid(s, e.id, month),
                           ),
                         )}{" "}
                         ر.س
                       </b>
                     </div>
-                    {monthlyExpense(e, month) > expensePaid(s, e.id, month) && (
-                      <Button kind="gold" onClick={() => payExpense(e)}>
-                        تسجيل سداد مصروف
-                      </Button>
+                    {!coveredFeedPlan(s, e, month) &&
+                      expensePlan(s, e, month) >
+                        expensePaid(s, e.id, month) && (
+                        <Button kind="gold" onClick={() => payExpense(e)}>
+                          تسجيل سداد مصروف
+                        </Button>
+                      )}
+                    {coveredFeedPlan(s, e, month) && (
+                      <p className="notice small">
+                        خطة شراء يغطيها الشراء المسجل من المخزون؛ لا تسددها مرة
+                        ثانية.
+                      </p>
                     )}
                     {e.collectedHorseIds?.length > 0 ||
                     s.expensePayments.some((p) => p.expenseId === e.id) ? (
@@ -1817,7 +2025,8 @@ export default function App() {
                             سداد ملغى: {p.voidReason}
                           </p>
                         ) : (
-                          isAdmin && (
+                          isAdmin &&
+                          !p.stockTransactionId && (
                             <button
                               className="danger-text"
                               onClick={() =>
@@ -2205,7 +2414,7 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.6.0 · أندرويد
+                  الأثيل · الإصدار 1.7.0 · أندرويد
                 </p>
                 <UpdateButton />
               </>
@@ -2248,6 +2457,26 @@ export default function App() {
         <div className="busy" role="status">
           جارٍ تنفيذ العملية…
         </div>
+      )}
+      {releaseOpen && a && (
+        <Modal
+          title={`ما الجديد في الأثيل ${RELEASE_VERSION}؟`}
+          close={closeRelease}
+        >
+          <p>أبرز التغييرات في هذا التحديث:</p>
+          <div className="release-notes" dir="rtl">
+            {RELEASE_NOTES.map((section) => (
+              <section key={section.title}>
+                <h3>{section.title}</h3>
+                <ul>
+                  {section.items.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </Modal>
       )}
       {loginOpen && (
         <Modal title="أهلًا بك في الأثيل" close={() => setLoginOpen(false)}>
@@ -2360,6 +2589,7 @@ function Modal({
   return (
     <dialog
       ref={ref}
+      dir="rtl"
       onCancel={(e) => {
         e.preventDefault();
         close();
@@ -2449,6 +2679,49 @@ function FormView({
             </p>
           )}
         </section>
+      )}
+      {form.inventoryDefinition &&
+        similarItems(state.mealTypes, v.name, form.values.id).length > 0 && (
+          <div className="notice warning">
+            <p>
+              أصناف مشابهة:{" "}
+              {similarItems(state.mealTypes, v.name, form.values.id)
+                .map((m) => m.name)
+                .join("، ")}
+              . للشراء اختر الصنف الموجود.
+            </p>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={v.confirmSimilar === true}
+                onChange={(e) => update("confirmSimilar", e.target.checked)}
+              />{" "}
+              راجعت الأصناف وهذا صنف مختلف فعلًا
+            </label>
+          </div>
+        )}
+      {form.inventoryItem && (
+        <div className="notice" aria-live="polite">
+          <b>مراجعة الشراء قبل الحفظ</b>
+          <p>
+            الرصيد بعد الإضافة:{" "}
+            {money(
+              Number(
+                state.mealTypes.find((m) => m.id === form.inventoryItem)
+                  ?.currentStock || 0,
+              ) + Number(v.amount || 0),
+            )}{" "}
+            {state.mealTypes.find((m) => m.id === form.inventoryItem)?.unit}
+          </p>
+          <p>المدفوع المسجل: {money(v.total)} ر.س</p>
+          <p>
+            سعر الوحدة لهذه الفاتورة:{" "}
+            {money(
+              Number(v.total || 0) / Math.max(Number(v.amount || 0), 0.01),
+            )}{" "}
+            ر.س
+          </p>
+        </div>
       )}
       {form.fields
         .filter((f) => !f.when || v[f.when[0]] === f.when[1])
@@ -2663,12 +2936,15 @@ function actionLabel(action: string) {
         "meal.save": "تحديث صنف",
         "meal.delete": "حذف صنف",
         "stock.move": "حركة مخزون",
+        "stock.purchase": "شراء مخزون مدفوع",
+        "finance.rollover": "حفظ الفترة المالية",
         "expense.save": "تسجيل مصروف",
-        "expense.pay": "سداد مصروف",
+        "expense.pay": TERMS.expensePayment,
         "expense.payment.void": "إلغاء سداد مصروف",
         "finance.snapshot": "حفظ التقرير المالي",
         "expense.delete": "حذف مصروف",
         "income.collect": "تحصيل رسوم الإيواء",
+        "income.pay": "تسجيل دفعة من المالك",
         "profile.save": "تحديث الحساب",
         "settings.save": "تحديث بيانات الإسطبل",
         "member.create": "تسجيل عضو",

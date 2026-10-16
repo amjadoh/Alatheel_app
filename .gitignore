@@ -19,3 +19,5 @@ GoogleService-Info.plist
 service-account*.json
 
 downloads-hosting/
+qa-results/
+android-qa/

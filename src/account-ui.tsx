@@ -1,3 +1,4 @@
+import { TERMS } from "./terms";
 import { useRef, useState } from "react";
 import type { State, Row } from "../functions/src/domain";
 import {
@@ -27,7 +28,7 @@ export function ReceiptDetails({ receipt: r }: { receipt: Row }) {
         {businessDay(r.collectedAt)} · {money(r.amount)} ر.س · {r.horseName}
       </summary>
       <p className="small muted">
-        سند {r.id} · {methods[r.method] || "طريقة غير مسجلة"}
+        سند تحصيل {r.id} · {methods[r.method] || "طريقة غير مسجلة"}
       </p>
       {r.accountVersion ? (
         (r.allocations || []).map((x: any) => (
@@ -149,6 +150,15 @@ export function HorseAccount({
       setBusy(false);
     }
   }
+  if (
+    horse.status === "private" ||
+    (horse.status === "archived" && horse.previousStatus === "private")
+  )
+    return (
+      <div className="notice">
+        خيل ملك خاص؛ تتابع تكلفته من ملف الخيل دون تحصيل على المالك.
+      </div>
+    );
   return (
     <div className="horse-account">
       <p className="eyebrow">
@@ -180,9 +190,17 @@ export function HorseAccount({
               {money(account.outstanding)} <small>ر.س</small>
             </div>
             <p>رصيد مقدم: {money(account.credit)} ر.س</p>
+            <dl className="ledger">
+              <dt>متأخرات الأشهر السابقة</dt>
+              <dd>{money(account.arrears)} ر.س</dd>
+              <dt>مستحق هذا الشهر حتى اليوم</dt>
+              <dd>{money(account.dueNow)} ر.س</dd>
+              <dt>يستحق لاحقًا هذا الشهر</dt>
+              <dd>{money(account.upcoming)} ر.س</dd>
+            </dl>
             <small>
-              الاستحقاقات حتى نهاية {monthName(today.slice(0, 7))} · المدفوعات
-              حتى {today}
+              الاستحقاقات حتى نهاية {monthName(today.slice(0, 7))} · دفعات
+              المالك حتى {today}
             </small>
           </div>
           <div className="account-totals">
@@ -190,7 +208,7 @@ export function HorseAccount({
               مستحق مسجل <b>{money(account.charged)}</b>
             </span>
             <span>
-              مدفوع مسجل <b>{money(account.paid)}</b>
+              محصل من المالك <b>{money(account.paid)}</b>
             </span>
           </div>
           {!horse.accountVersion && (
@@ -200,7 +218,7 @@ export function HorseAccount({
               خارج التطبيق تحتاج تسجيلها بتاريخها الصحيح.
             </p>
           )}
-          <h3>الاستحقاقات وتوزيع السداد</h3>
+          <h3>الاستحقاقات وتوزيع دفعات المالك</h3>
           {account.items.length ? (
             account.items.map((x) => (
               <div className="account-cycle" key={x.id}>
@@ -218,14 +236,14 @@ export function HorseAccount({
                   الاستحقاق {x.dueDate} · القيمة {money(x.amount)} ر.س
                 </p>
                 <p className="small">
-                  مدفوع {money(x.paid)} · متبقي {money(x.remaining)} ر.س
+                  محصل {money(x.paid)} · متبقي {money(x.remaining)} ر.س
                 </p>
               </div>
             ))
           ) : (
             <p>لا توجد استحقاقات مسجلة.</p>
           )}
-          <h3>سجل المدفوعات الكامل</h3>
+          <h3>سجل دفعات المالك</h3>
           {account.receipts.length ? (
             account.receipts.map((r) => (
               <ReceiptDetails key={r.id} receipt={r} />
@@ -259,7 +277,7 @@ export function HorseAccount({
               ))}
             </div>
             <label className="field">
-              <span>تاريخ الدفع</span>
+              <span>{TERMS.collectionDate}</span>
               <input
                 type="date"
                 value={paidAt}
@@ -274,7 +292,7 @@ export function HorseAccount({
             </label>
             {paymentType === "monthly" && validDate && (
               <p className="notice">
-                استحقاق {monthName(month)} · يحدد من تاريخ الدفع. المتبقي:{" "}
+                استحقاق {monthName(month)} · يحدد من تاريخ التحصيل. المتبقي:{" "}
                 {money(plan.selectedBalance)} ر.س
               </p>
             )}
@@ -295,7 +313,7 @@ export function HorseAccount({
                     </label>
                   ))
                 ) : (
-                  <p>لا توجد متأخرات قبل شهر تاريخ الدفع.</p>
+                  <p>لا توجد متأخرات قبل شهر تاريخ التحصيل.</p>
                 )}
               </div>
             )}
@@ -314,8 +332,8 @@ export function HorseAccount({
             </label>
             {paymentType === "partial" && (
               <p className="small muted">
-                يوزع على الأقدم حتى شهر تاريخ الدفع، والزيادة رصيد مقدم يُستخدم
-                عند حلول الاستحقاقات.
+                يوزع على الأقدم حتى شهر تاريخ التحصيل، والزيادة رصيد مقدم
+                يُستخدم عند حلول الاستحقاقات.
               </p>
             )}
             {paymentType === "arrears" && (
@@ -325,7 +343,7 @@ export function HorseAccount({
               </p>
             )}
             <label className="field">
-              <span>طريقة الدفع</span>
+              <span>{TERMS.collectionMethod}</span>
               <select
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}

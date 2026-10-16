@@ -1,6 +1,7 @@
 import { money, nextMonth } from "./domain";
 import type { State, Row } from "./domain";
 import { businessDay } from "./dates";
+import { boardingAmount, boardingTerms } from "./boarding";
 
 export type AccountItem = {
   id: string;
@@ -11,6 +12,8 @@ export type AccountItem = {
   paid: number;
   remaining: number;
   expenseId?: string;
+  baseFee?: number;
+  billingPolicy?: string;
 };
 export const endOfMonth = (day: string) => {
   const [y, m] = day.slice(0, 7).split("-").map(Number);
@@ -55,7 +58,18 @@ export function horseAccount(
       kind: "boarding",
       dueDate: cursor,
       name: "إيواء " + cursor.slice(0, 7),
-      amount: money(Number(value?.amount ?? h.boardingFee ?? 0)),
+      amount:
+        value?.billingPolicy === "per_day"
+          ? boardingAmount(h, cursor.slice(0, 7), value.baseFee, "per_day")
+          : money(
+              Number(value?.amount ?? boardingAmount(h, cursor.slice(0, 7))),
+            ),
+      baseFee:
+        value?.baseFee ??
+        value?.amount ??
+        boardingTerms(h, cursor.slice(0, 7)).fee,
+      billingPolicy:
+        value?.billingPolicy || boardingTerms(h, cursor.slice(0, 7)).policy,
       paid: 0,
       remaining: 0,
     });
@@ -138,6 +152,10 @@ export function horseAccount(
   const rows = [...items.values()].sort(
     (a, b) => a.dueDate.localeCompare(b.dueDate) || a.id.localeCompare(b.id),
   );
+  credit += rows.reduce(
+    (n, row) => n + Math.max(0, (paid.get(row.id) || 0) - cents(row.amount)),
+    0,
+  );
   for (const row of rows) {
     const amount = cents(row.amount),
       recorded = Math.min(amount, paid.get(row.id) || 0),
@@ -154,6 +172,21 @@ export function horseAccount(
         String(b.collectedAt).localeCompare(String(a.collectedAt)),
       ),
     outstanding: money(rows.reduce((n, x) => n + x.remaining, 0)),
+    arrears: money(
+      rows
+        .filter((x) => x.dueDate < asOf.slice(0, 7) + "-01")
+        .reduce((n, x) => n + x.remaining, 0),
+    ),
+    dueNow: money(
+      rows
+        .filter(
+          (x) => x.dueDate >= asOf.slice(0, 7) + "-01" && x.dueDate <= asOf,
+        )
+        .reduce((n, x) => n + x.remaining, 0),
+    ),
+    upcoming: money(
+      rows.filter((x) => x.dueDate > asOf).reduce((n, x) => n + x.remaining, 0),
+    ),
     credit: credit / 100,
     charged: money(rows.reduce((n, x) => n + x.amount, 0)),
     paid: money(

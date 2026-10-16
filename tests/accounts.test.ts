@@ -278,6 +278,7 @@ test("paid future cycle remains a credit after checkout before its due date", ()
 });
 test("daily legacy and seven monthly portions use independent multipliers including February", () => {
   const s = seed();
+  s.horses[0].entryDate = "2024-01-01"; // The horse must be present in both February periods.
   s.mealTypes = [
     { id: "f", name: "مركزات", unit: "كيس 40 كجم", pricePerUnit: 90 },
     { id: "x", name: "إضافي", unit: "كجم", pricePerUnit: 10 },

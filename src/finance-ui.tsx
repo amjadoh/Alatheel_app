@@ -1,3 +1,4 @@
+import { TERMS } from "./terms";
 import { useEffect, useState } from "react";
 import {
   ArrowUpLeft,
@@ -69,12 +70,14 @@ export function HorseFinancialPanel({
         <span className="pill">{month}</span>
       </div>
       <div className="finance-mini-grid">
-        <div>
-          <span>إيواء شهري متوقع</span>
-          <b>
-            {amount(f.expected)} <small>ر.س</small>
-          </b>
-        </div>
+        {!f.privateHorse && (
+          <div>
+            <span>إيواء شهري متوقع</span>
+            <b>
+              {amount(f.expected)} <small>ر.س</small>
+            </b>
+          </div>
+        )}
         {staff && (
           <div>
             <span>تكلفته المقدّرة</span>
@@ -83,20 +86,26 @@ export function HorseFinancialPanel({
             </b>
           </div>
         )}
-        <div>
-          <span>المقبوض خلال الشهر</span>
-          <b>
-            {amount(f.cash)} <small>ر.س</small>
-          </b>
-        </div>
-        <div>
-          <span>متبقي حتى نهاية الشهر</span>
-          <b
-            className={f.outstanding > 0 ? "value-negative" : "value-positive"}
-          >
-            {amount(f.outstanding)} <small>ر.س</small>
-          </b>
-        </div>
+        {!f.privateHorse && (
+          <div>
+            <span>التحصيل خلال الشهر</span>
+            <b>
+              {amount(f.cash)} <small>ر.س</small>
+            </b>
+          </div>
+        )}
+        {!f.privateHorse && (
+          <div>
+            <span>متبقي حتى نهاية الشهر</span>
+            <b
+              className={
+                f.outstanding > 0 ? "value-negative" : "value-positive"
+              }
+            >
+              {amount(f.outstanding)} <small>ر.س</small>
+            </b>
+          </div>
+        )}
       </div>
       {staff && (
         <>
@@ -109,7 +118,7 @@ export function HorseFinancialPanel({
                 : !f.complete
                   ? f.margin < 0
                     ? "عجز مقدّر على الأقل · تكلفة ناقصة"
-                    : "الصافي المبدئي · التكلفة غير مكتملة"
+                    : "نتيجة التشغيل المبدئية · التكلفة غير مكتملة"
                   : f.margin < 0
                     ? "عجز تشغيل مقدّر"
                     : "فائض تشغيل مقدّر"}
@@ -123,28 +132,38 @@ export function HorseFinancialPanel({
             <dd>{amount(f.food)} ر.س</dd>
             <dt>المصروفات المشتركة والخاصة</dt>
             <dd>{amount(f.other)} ر.س</dd>
-            {f.recoveredExpected > 0 && (
+            {!f.privateHorse && f.recoveredExpected > 0 && (
               <>
-                <dt>مصروفات مستردة من المالك</dt>
+                <dt>مصروفات تُسترد من المالك</dt>
                 <dd>{amount(f.recoveredExpected)} ر.س</dd>
               </>
             )}
-            <dt>متبقي إيواء</dt>
-            <dd>{amount(f.boardingOutstanding)} ر.س</dd>
-            <dt>مصروفات متبقية على المالك</dt>
-            <dd>{amount(f.extrasOutstanding)} ر.س</dd>
+            {!f.privateHorse && (
+              <>
+                <dt>متبقي إيواء</dt>
+                <dd>{amount(f.boardingOutstanding)} ر.س</dd>
+                <dt>مصروفات متبقية على المالك</dt>
+                <dd>{amount(f.extrasOutstanding)} ر.س</dd>
+              </>
+            )}
           </dl>
           {f.missing.length > 0 && (
             <p className="notice warning">
-              التكلفة غير مكتملة: {f.missing.join("، ")}. لا تعتمد الصافي
+              التكلفة غير مكتملة: {f.missing.join("، ")}. لا تعتمد نتيجة التشغيل
               المعروض كربح نهائي.
             </p>
           )}
           <p className="small muted">
-            الدخل والتكلفة تقدير لشهر كامل بالرسوم وبرنامج التغذية والأسعار
-            الحالية، دون تجزئة شهر الدخول أو الخروج. المتبقي يشمل دورات الإيواء
-            غير المحصلة حتى نهاية الشهر، ويقدّر غير المسجل منها بالرسوم الحالية.
-            تأخر التحصيل يظهر منفصلًا عن عجز التشغيل.
+            {f.privateHorse ? (
+              "خيل ملك خاص؛ يحسب ضمن تكلفة التغذية والمصروفات دون إيراد إيواء أو تحصيل على المالك."
+            ) : (
+              <>
+                الإيواء وفق سياسة الشهر الكامل أو الأيام المسجلة للخيل. التغذية
+                لأيام الإقامة، وعدد المرات الشهري موزع بنسبة أيام الإقامة.
+                المتبقي يشمل الدورات حتى نهاية الشهر. الأشهر المغلقة تحتفظ
+                بحساباتها وأسعارها. تأخر التحصيل يظهر منفصلًا عن عجز التشغيل.
+              </>
+            )}
           </p>
         </>
       )}
@@ -167,6 +186,8 @@ export function FinancialDashboard({
   admin: boolean;
 }) {
   const live = financialSummary(state, month);
+  const closed = state.financialPeriods.find((p) => p.id === month && p.closed);
+  const tracking = state.financialPeriods.length > 0;
   const saved = state.financialReports.find((r) => r.id === month);
   const [showSaved, setShowSaved] = useState(false);
   useEffect(() => setShowSaved(false), [month]);
@@ -175,30 +196,78 @@ export function FinancialDashboard({
     <>
       <section className="finance-headline">
         <p className="eyebrow">وضع الإسطبل · {month}</p>
-        <h2>
-          {f.incompleteCount
-            ? "الصافي مبدئي حتى اكتمال التغذية"
-            : f.operatingBalance < 0
-              ? "الإيواء لا يغطي تكلفة التشغيل"
-              : "الإيواء يغطي تكلفة التشغيل المقدّرة"}
-        </h2>
+        {closed ? (
+          <p className="notice">
+            شهر مغلق تلقائيًا · الأسعار والكميات والحسابات محفوظة كما كانت عند
+            الإغلاق.
+          </p>
+        ) : (
+          <p className="small muted">
+            {tracking &&
+            month < state.financialPeriods.map((p) => p.id).sort()[0]
+              ? "فترة قديمة قبل بدء الحفظ التلقائي؛ الأرقام تقدير بالبيانات المتاحة."
+              : "الشهر الجاري مفتوح؛ يحفظ تلقائيًا عند بدء الشهر التالي قبل أي تعديل."}
+          </p>
+        )}
+        <h2>{TERMS.cashDifference}</h2>
         <div
-          className={`headline-amount ${f.incompleteCount ? "value-warning" : f.operatingBalance < 0 ? "value-negative" : "value-positive"}`}
+          className={`headline-amount ${f.cashBalance < 0 ? "value-negative" : "value-positive"}`}
         >
-          {f.operatingBalance < 0 ? <TrendingDown /> : <TrendingUp />}
-          <strong>{amount(f.operatingBalance)}</strong>
+          {f.cashBalance < 0 ? <TrendingDown /> : <TrendingUp />}
+          <strong>{amount(f.cashBalance)}</strong>
           <span>ر.س</span>
         </div>
         <p>
-          {f.operatingBalance < 0 ? "عجز تشغيل مقدّر" : "فائض تشغيل مقدّر"} =
-          الدخل المتوقع − تكلفة التشغيل
+          حصلت {amount(f.collected)} − دفعت {amount(f.paid)} ر.س
         </p>
         <p className="small muted">
-          ميزانية شهر كامل بالأسعار والبرنامج الحاليين.{" "}
-          {showSaved
-            ? `تقرير محفوظ بتاريخ ${String(saved?.createdAt).slice(0, 10)}`
-            : "تقدير مباشر؛ ليس ربحًا محاسبيًا نهائيًا."}
+          وفق تواريخ التحصيل والدفع المسجلة؛ يشمل شراء المخزون والرواتب
+          والمصروفات المسددة. لا يشمل رصيدًا افتتاحيًا ولا يمثل رصيد البنك.
         </p>
+      </section>
+      <div className="dashboard-grid finance-grid">
+        <button className="stat gold" onClick={() => onGo("income")}>
+          <Wallet />
+          <span>حصلت من الملاك</span>
+          <strong>{amount(f.collected)}</strong>
+          <small>تحصيل فعلي خلال الشهر</small>
+        </button>
+        <button className="stat" onClick={() => onGo("inventory")}>
+          <Receipt />
+          <span>دفعت للمخزون</span>
+          <strong>{amount(f.inventoryPaid || 0)}</strong>
+          <small>مشتريات علف مسددة</small>
+        </button>
+        <button className="stat" onClick={() => onGo("expenses")}>
+          <Receipt />
+          <span>دفعت للرواتب</span>
+          <strong>{amount(f.salaryPaid || 0)}</strong>
+          <small>سداد فعلي</small>
+        </button>
+        <button className="stat" onClick={() => onGo("expenses")}>
+          <Receipt />
+          <span>دفعت لمصروفات أخرى</span>
+          <strong>{amount(f.otherPaid ?? f.paid)}</strong>
+          <small>مثل الطبيب والخدمات</small>
+        </button>
+      </div>
+      <section className="card">
+        <h2>الدخل والتكلفة المتوقعة</h2>
+        <div
+          className={`profit-banner ${f.operatingBalance < 0 ? "negative" : "positive"}`}
+        >
+          <span>
+            {f.operatingBalance < 0 ? "عجز تشغيل مقدّر" : "فائض تشغيل مقدّر"}
+          </span>
+          <strong>{amount(f.operatingBalance)} ر.س</strong>
+        </div>
+        <p className="small muted">
+          الدخل المتوقع − استهلاك التغذية ومصروفات التشغيل. المصروف غير المدفوع
+          يدخل في التكلفة، ويظهر ضمن المدفوعات عند سداده فقط.{" "}
+          {f.incompleteCount
+            ? "التكلفة مبدئية لوجود بيانات تغذية ناقصة."
+            : "التقدير حسب برنامج التغذية وأيام الإقامة وسياسة الإيواء."}
+        </p>{" "}
       </section>
       <div className="dashboard-grid finance-grid">
         <button className="stat dark" onClick={() => onGo("income")}>
@@ -207,7 +276,7 @@ export function FinancialDashboard({
           <strong>{amount(f.revenue)}</strong>
           <small>
             إيواء {amount(f.expected)}
-            {f.recoveries ? ` + مستردات ${amount(f.recoveries)}` : ""}
+            {f.recoveries ? ` + مصروفات تُسترد ${amount(f.recoveries)}` : ""}
           </small>
         </button>
         <button className="stat" onClick={() => onGo("expenses")}>
@@ -220,7 +289,7 @@ export function FinancialDashboard({
         </button>
         <button className="stat gold" onClick={() => onGo("income")}>
           <Wallet />
-          <span>المقبوض خلال الشهر</span>
+          <span>التحصيل خلال الشهر</span>
           <strong>{amount(f.collected)}</strong>
           <small>وفق تاريخ التحصيل الفعلي</small>
         </button>
@@ -264,7 +333,7 @@ export function FinancialDashboard({
           تكلفة الاستهلاك والسداد الفعلي.
         </p>
         <div className="spread">
-          <h2>المقبوض والمدفوع المسجّل</h2>
+          <h2>التحصيل والمدفوعات المسجلة</h2>
           <span className="pill">حركة نقدية</span>
         </div>
         <div className="ledger">
@@ -284,7 +353,7 @@ export function FinancialDashboard({
           </strong>
         </div>
         <p className="small muted">
-          فرق المقبوضات والمدفوعات المسجلة فقط؛ لا يمثل رصيد البنك ولا يتضمن
+          الفرق بين التحصيل والمدفوعات المسجلة فقط؛ لا يمثل رصيد البنك ولا يتضمن
           رصيدًا افتتاحيًا.
         </p>
         {!f.expensePaymentCount && (
@@ -313,8 +382,9 @@ export function FinancialDashboard({
           <dd>{amount(f.plannedPayments)} ر.س</dd>
         </dl>
         <p className="small muted">
-          مشتريات العلف ضمن الالتزامات النقدية. تكلفة التشغيل أعلاه تستخدم
-          استهلاك كل خيل بدل إضافة قيمة الشراء مرة ثانية.
+          خطط شراء العلف تغطيها فواتير الشراء لنفس الصنف؛ لا يجمع الاثنان مرتين.
+          تكلفة التشغيل أعلاه تستخدم استهلاك كل خيل بدل إضافة قيمة الشراء مرة
+          ثانية.
         </p>
         {f.unallocatedOperating > 0 && (
           <p className="warning small">

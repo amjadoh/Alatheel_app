@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import {
   getFirestore,
+  getDoc,
   collection,
   doc,
   onSnapshot,
@@ -97,6 +98,15 @@ export function connect(callback: typeof emit) {
     if (!current) return;
     try {
       await httpsCallable(functions!, "ensureProfile")({});
+      // Owners have no access to financial bases; staff rollover is server-authorized.
+      // Try after profile read below, before subscribing to the financial data.
+      const initialProfile = await getDoc(doc(db!, "users", current.uid));
+      if (["admin", "employee"].includes(initialProfile.data()?.role)) {
+        await httpsCallable(
+          functions!,
+          "operate",
+        )({ action: "finance.rollover", requestId: crypto.randomUUID() });
+      }
       const pUnsub = onSnapshot(doc(db!, "users", current.uid), (snap) => {
         const p = snap.data();
         if (!p || p.disabled) {
@@ -114,6 +124,7 @@ export function connect(callback: typeof emit) {
           role: p.role,
           disabled: p.disabled,
           ownerRecordId: p.ownerRecordId,
+          photoURL: current.photoURL || "",
         };
         if (changed) {
           stop();
@@ -175,6 +186,7 @@ function subscribeData() {
         "expenses",
         "expensePayments",
         "financialReports",
+        "financialPeriods",
       ].includes(c),
   );
   for (const c of collections) {
@@ -188,6 +200,7 @@ function subscribeData() {
         "expenses",
         "expensePayments",
         "financialReports",
+        "financialPeriods",
       ].includes(c)
     )
       continue;

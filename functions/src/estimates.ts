@@ -2,9 +2,23 @@ import { money, shares } from "./domain";
 import type { State, Row } from "./domain";
 import { feedingMeasure, feedingUnitPrice, expenseFeedMeal } from "./feeding";
 import { businessDay } from "./dates";
+import { stayDays } from "./boarding";
 
 export function isFeedPurchase(s: State, e: Row) {
   return e.expenseKind === "feed_purchase" || !!expenseFeedMeal(e, s.mealTypes);
+}
+export function coveredFeedPlan(s: State, e: Row, month: string) {
+  const meal = expenseFeedMeal(e, s.mealTypes);
+  return (
+    !!meal &&
+    e.frequency !== "once" &&
+    s.expenses.some(
+      (x) =>
+        x.stockTransactionId &&
+        x.mealTypeId === meal.id &&
+        businessDay(x.incurredAt).slice(0, 7) === month,
+    )
+  );
 }
 
 export function monthDays(month: string) {
@@ -44,7 +58,12 @@ export function expenseShares(s: State, e: Row, month: string) {
       ? (e.allocations as Record<string, number>)
       : {};
   const targets = expenseIsShared(e)
-    ? s.horses.filter((h) => h.status !== "archived").map((h) => h.id)
+    ? s.horses
+        .filter(
+          (h) =>
+            stayDays(h, month) > 0 && (h.status !== "archived" || !!h.exitDate),
+        )
+        .map((h) => h.id)
     : [...new Set<string>(e.horseIds)].filter((id) =>
         s.horses.some((h) => h.id === id),
       );
@@ -72,8 +91,35 @@ function feedingItems(s: State, h: Row, days: number) {
 }
 
 export function horseCost(s: State, h: Row, month: string) {
-  const days = monthDays(month);
-  const foodItems = feedingItems(s, h, days);
+  const period = s.financialPeriods?.find((p) => p.id === month && p.closed);
+  if (period) {
+    const f = period.summary.horses.find((r: Row) => r.id === h.id);
+    return {
+      food: Number(f?.food || 0),
+      other: Number(f?.other || 0),
+      total: Number(f?.total || 0),
+      days: Number(f?.days || 0),
+      foodItems: (f?.foodItems || []) as any[],
+      expenseItems: (f?.expenseItems || []) as {
+        name: string;
+        frequency: string;
+        shared: boolean;
+        monthlyTotal: number;
+        amount: number;
+      }[],
+      missingFeed: (f?.missing || []) as string[],
+    };
+  }
+  const days = stayDays(h, month);
+  const foodItems = feedingItems(s, h, days).map((f: any) =>
+    f.frequency === "monthly"
+      ? {
+          ...f,
+          count: money((f.count * days) / monthDays(month)),
+          amount: money((f.amount * days) / monthDays(month)),
+        }
+      : f,
+  );
   const expenseItems = s.expenses
     .filter((e) => !isFeedPurchase(s, e))
     .map((e) => ({
@@ -122,6 +168,19 @@ export function horseCost(s: State, h: Row, month: string) {
 }
 
 export function costs(s: State, month: string) {
+  const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);
+  if (closed) {
+    const f = closed.summary;
+    return {
+      feeding: Number(f.feeding),
+      other: Number(f.other),
+      total: Number(f.total),
+      collected: Number(f.collected),
+      expected: Number(f.expected),
+      balance: money(f.collected - f.total),
+      purchases: Number(f.purchases),
+    };
+  }
   const active = s.horses.filter((h) => h.status !== "archived");
   const feeding = money(
     active.reduce(
@@ -141,10 +200,21 @@ export function costs(s: State, month: string) {
       .filter((e) => !isFeedPurchase(s, e))
       .reduce((sum, e) => sum + monthlyExpense(e, month), 0),
   );
+  // A recurring feed budget is covered by actual purchase invoices for that item.
+  // Count the higher of the budget and invoices, never both on top of each other.
+  const purchaseGroups = new Map<string, { plan: number; invoices: number }>();
+  for (const e of s.expenses.filter((e) => isFeedPurchase(s, e))) {
+    const key = expenseFeedMeal(e, s.mealTypes)?.id || e.id,
+      g = purchaseGroups.get(key) || { plan: 0, invoices: 0 };
+    if (e.frequency === "once") g.invoices += monthlyExpense(e, month);
+    else g.plan += monthlyExpense(e, month);
+    purchaseGroups.set(key, g);
+  }
   const purchases = money(
-    s.expenses
-      .filter((e) => isFeedPurchase(s, e))
-      .reduce((sum, e) => sum + monthlyExpense(e, month), 0),
+    [...purchaseGroups.values()].reduce(
+      (n, g) => n + Math.max(g.plan, g.invoices),
+      0,
+    ),
   );
   const collected = money(
     s.income

@@ -21,6 +21,20 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --dir functions build
+      - name: Install isolated browser test tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/alatheel-ui" --no-save playwright@1.56.1
+          "$RUNNER_TEMP/alatheel-ui/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Verify mobile UI with isolated sample data
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/ui-check.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Alatheel-Mobile-UI-QA
+          path: qa-results/
+          retention-days: 30
       - name: Configure the registered Firebase Android app
         run: cp resources/firebase-android.json android/app/google-services.json
       - run: pnpm exec cap sync android
@@ -48,10 +62,46 @@ jobs:
           test -n "$ALATHEEL_KEYSTORE_PASSWORD"
           ./gradlew testDebugUnitTest assembleRelease --no-daemon
           keytool -list -keystore app/alatheel-release.p12 -storetype PKCS12 -storepass:env ALATHEEL_KEYSTORE_PASSWORD -alias alatheel > app/build/outputs/apk/release/signing-certificate.txt
+      - name: Verify the built APK identity and signing certificate
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-signature.txt
+          grep -Fiq '2f508f35d389af0260d7d216fb750e2e49ecaeb4e4ffe5a9f928b1f7a7d6f83f' android/app/build/outputs/apk/release/apk-signature.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-identity.txt
+          grep -Fq "package: name='com.alatheel.stable' versionCode='8' versionName='1.7.0'" android/app/build/outputs/apk/release/apk-identity.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Alatheel-Android-Google
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/apk/release/signing-certificate.txt
+            android/app/build/outputs/apk/release/apk-signature.txt
+            android/app/build/outputs/apk/release/apk-identity.txt
+          retention-days: 30
+  emulator:
+    needs: android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools emulator system-images;android-35;google_apis;x86_64"
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Alatheel-Android-Google
+          path: apk
+      - name: Verify signed app starts on Android
+        shell: bash
+        run: bash scripts/android-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Alatheel-Android-Smoke-QA
+          path: android-qa/
           retention-days: 30

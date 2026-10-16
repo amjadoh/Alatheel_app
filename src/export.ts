@@ -1,3 +1,4 @@
+import { TERMS } from "./terms";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
@@ -21,6 +22,10 @@ export async function exportExcel(
   month: string,
   includeFinancials = false,
 ) {
+  const closed = includeFinancials
+    ? s.financialPeriods.find((p) => p.id === month && p.closed)
+    : undefined;
+  if (closed?.basis) s = { ...s, ...closed.basis };
   const { default: ExcelJS } = await import("exceljs");
   const book = new ExcelJS.Workbook();
   book.creator = "إسطبل الأثيل";
@@ -33,15 +38,15 @@ export async function exportExcel(
         "الحالة",
         "التسجيل",
         "رسوم الإيواء",
-        "المقبوض خلال الشهر",
+        "التحصيل خلال الشهر",
         "متبقي حتى نهاية الشهر",
         ...(includeFinancials
           ? [
               "التغذية التقديرية",
               "مصروفات التشغيل",
               "إجمالي التكلفة",
-              "الدخل المتوقع مع المستردات",
-              "صافي التشغيل المقدّر",
+              "الدخل المتوقع مع المصروفات المستحقة على المالك",
+              TERMS.operatingResult,
               "اكتمال التكلفة",
             ]
           : []),
@@ -76,9 +81,9 @@ export async function exportExcel(
         "المالك",
         "المبلغ",
         "الاستحقاق",
-        "التحصيل",
+        TERMS.collectionDate,
         "نوع الدفعة",
-        "طريقة الدفع",
+        TERMS.collectionMethod,
         "رصيد مقدم وقت التسجيل",
         "الملاحظة",
         "الحالة",
@@ -156,7 +161,7 @@ export async function exportExcel(
   ];
   sheets.push([
     "توزيع الدفعات",
-    ["السند", "الخيل", "تاريخ الدفع", "الاستحقاق", "النوع", "المبلغ"],
+    ["السند", "الخيل", TERMS.collectionDate, "الاستحقاق", "النوع", "المبلغ"],
     s.income.flatMap((i) =>
       (i.allocations || []).map((x: any) => [
         i.id,
@@ -189,25 +194,38 @@ export async function exportExcel(
       "الملخص المالي",
       ["البيان", "ريال", "الأساس"],
       [
-        ["إيواء متوقع", f.expected, "شهر كامل بالرسوم الحالية"],
-        ["مستردات متوقعة من الملاك", f.recoveries, "مصروفات خاصة مستردة"],
-        ["الدخل المتوقع", f.revenue, "إيواء ومستردات"],
+        ["إيواء متوقع", f.expected, "وفق سياسة الإيواء المسجلة وأيام الإقامة"],
+        [
+          "مصروفات تُسترد من الملاك",
+          f.recoveries,
+          "مصروفات خاصة مستحقة على الملاك",
+        ],
+        ["الدخل المتوقع", f.revenue, "إيواء ومصروفات تُسترد من الملاك"],
         [
           "تكلفة التشغيل المقدّرة",
           f.total,
           "استهلاك التغذية والتشغيل دون تكرار الشراء",
         ],
         [
-          "صافي التشغيل المقدّر",
+          TERMS.operatingResult,
           f.operatingBalance,
           f.incompleteCount
             ? "مبدئي — توجد بيانات تغذية ناقصة"
-            : "تقديري بالبرنامج الحالي",
+            : closed
+              ? "محفوظ عند إغلاق الشهر"
+              : "تقديري ببرنامج الشهر الجاري",
         ],
-        ["المقبوض في الشهر", f.collected, "تاريخ التحصيل بتوقيت الرياض"],
-        ["المدفوع في الشهر", f.paid, "سداد المصروفات المسجل، باستثناء الملغى"],
+        ["التحصيل في الشهر", f.collected, "تاريخ التحصيل بتوقيت الرياض"],
         [
-          "فرق المقبوض والمدفوع",
+          "المدفوعات خلال الشهر",
+          f.paid,
+          "سداد المصروفات المسجل، باستثناء الملغى",
+        ],
+        ["مدفوع للمخزون", f.inventoryPaid || 0, "فواتير شراء مسددة"],
+        ["مدفوع للرواتب", f.salaryPaid || 0, "سداد فعلي"],
+        ["مدفوع لمصروفات أخرى", f.otherPaid ?? f.paid, "سداد فعلي"],
+        [
+          TERMS.cashDifference,
           f.cashBalance,
           "لا يشمل رصيدًا افتتاحيًا ولا يمثل رصيد البنك",
         ],
@@ -226,7 +244,13 @@ export async function exportExcel(
           f.fundingBalance,
           "الدخل المتوقع ناقص الرواتب والتشغيل ومشتريات العلف حسب التكرار",
         ],
-        ["مصدر التقرير", "", "أرقام مباشرة وقت التصدير؛ ليست النسخة المحفوظة"],
+        [
+          "مصدر التقرير",
+          "",
+          closed
+            ? "شهر مغلق؛ الأسعار والتفاصيل من أساس الشهر المحفوظ"
+            : "شهر مفتوح؛ أرقام مباشرة وقت التصدير",
+        ],
       ],
     ]);
     sheets.push([
@@ -234,7 +258,7 @@ export async function exportExcel(
       [
         "المصروف",
         "المبلغ",
-        "تاريخ الدفع",
+        TERMS.expensePaymentDate,
         "الفترة التي يخصها",
         "الحالة",
         "الملاحظة",
@@ -249,7 +273,7 @@ export async function exportExcel(
           p.amount,
           p.paidAt,
           p.period,
-          p.status === "void" ? "ملغى" : "مدفوع",
+          p.status === "void" ? "ملغى" : "مسدد",
           p.notes || "",
           p.voidReason || "",
         ]),
@@ -268,7 +292,9 @@ export async function exportExcel(
         monthlyExpense(e, month),
         expensePaid(s, e.id, month),
         Math.max(0, monthlyExpense(e, month) - expensePaid(s, e.id, month)),
-        Object.keys(e.allocations || {}).length ? "يسترد من الملاك" : "الإسطبل",
+        Object.keys(e.allocations || {}).length
+          ? "يُسترد من الملاك"
+          : "الإسطبل",
       ]),
     ]);
   }

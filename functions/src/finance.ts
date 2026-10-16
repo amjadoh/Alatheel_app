@@ -1,11 +1,26 @@
 import { money, nextMonth } from "./domain";
 import type { State, Row } from "./domain";
-import { costs, horseCost, monthlyExpense, isFeedPurchase } from "./estimates";
+import {
+  costs,
+  horseCost,
+  monthlyExpense,
+  isFeedPurchase,
+  coveredFeedPlan,
+} from "./estimates";
 import { businessDay } from "./dates";
 import { horseAccount } from "./accounts";
+import { stayDays, boardingAmount } from "./boarding";
 
 const collected = (i: Row) => i.status !== "pending" && i.status !== "void";
 const day = businessDay;
+export function cashCategory(e: Record<string, any>) {
+  if (e.expenseKind === "feed_purchase") return "inventory";
+  if (e.expenseCategory === "salary") return "salary";
+  if (e.expenseCategory === "other") return "other";
+  return /راتب|رواتب|salary|payroll/i.test(e.name || e.expenseName || "")
+    ? "salary"
+    : "other";
+}
 export function monthEnd(month: string) {
   monthlyExpense({ id: "validation", cost: 0 }, month); // Shared month validation.
   const [y, m] = month.split("-").map(Number);
@@ -38,13 +53,33 @@ export function expensePaid(s: State, expenseId: string, period: string) {
       .reduce((sum, p) => sum + Number(p.amount), 0),
   );
 }
+export function expensePlan(s: State, expense: Row, period: string) {
+  const closed = s.financialPeriods?.find((p) => p.id === period && p.closed);
+  const record = closed
+    ? closed.basis?.expenses.find((e: Row) => e.id === expense.id)
+    : expense;
+  return record ? monthlyExpense(record, period) : 0;
+}
 export function horseFinance(s: State, h: Row, month: string) {
+  const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);
+  if (closed) {
+    const row = closed.summary.horses.find((r: Row) => r.id === h.id);
+    if (row) return row as ReturnType<typeof calculateHorseFinance>;
+    return calculateHorseFinance(
+      { ...s, financialPeriods: [] },
+      { ...h, status: "archived", exitDate: "0001-01-01" },
+      month,
+    );
+  }
+  return calculateHorseFinance(s, h, month);
+}
+function calculateHorseFinance(s: State, h: Row, month: string) {
   const end = monthEnd(month);
   const start = `${month}-01`;
   const archived = h.status === "archived";
   const privateHorse =
     h.status === "private" || (archived && h.previousStatus === "private");
-  const active = !archived && (!h.entryDate || day(h.entryDate) <= end);
+  const active = stayDays(h, month) > 0 && (!archived || !!h.exitDate);
   const c = horseCost(s, h, month);
   const food = active ? c.food : 0,
     other = active ? c.other : 0;
@@ -55,7 +90,7 @@ export function horseFinance(s: State, h: Row, month: string) {
       .filter((i) => day(i.collectedAt).slice(0, 7) === month)
       .reduce((n, i) => n + Number(i.amount || 0), 0),
   );
-  const expected = active && !privateHorse ? Number(h.boardingFee || 0) : 0;
+  const expected = active && !privateHorse ? boardingAmount(h, month) : 0;
   const recoveredExpected = active
     ? money(
         s.expenses
@@ -138,7 +173,7 @@ export function horseFinance(s: State, h: Row, month: string) {
   )
     missing.push("سعر أحد أصناف التغذية غير مسجل");
   const revenue = money(expected + recoveredExpected);
-  const account = h.accountVersion ? horseAccount(s, h, end, end) : null;
+  const account = horseAccount(s, h, end, end);
   const ledgerBoarding = account
     ? money(
         account.items
@@ -184,6 +219,11 @@ export function horseFinance(s: State, h: Row, month: string) {
   };
 }
 export function financialSummary(s: State, month: string) {
+  const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);
+  if (closed) return closed.summary as ReturnType<typeof calculateSummary>;
+  return calculateSummary(s, month);
+}
+function calculateSummary(s: State, month: string) {
   const rows = s.horses.map((h) => horseFinance(s, h, month));
   const base = costs(s, month);
   const recoveries = money(rows.reduce((n, h) => n + h.recoveredExpected, 0));
@@ -196,6 +236,29 @@ export function financialSummary(s: State, month: string) {
       .reduce((sum, p) => sum + Number(p.amount), 0),
   );
   const plannedPayments = money(base.other + base.purchases);
+  const paidBy = { inventory: 0, salary: 0, other: 0 };
+  for (const p of s.expensePayments.filter(
+    (p) => p.status !== "void" && day(p.paidAt).slice(0, 7) === month,
+  )) {
+    const source = s.expenses.find((e) => e.id === p.expenseId);
+    const category =
+      p.cashCategory ||
+      cashCategory({
+        ...source,
+        ...p,
+        expenseKind:
+          source && isFeedPurchase(s, source)
+            ? "feed_purchase"
+            : p.expenseKind || source?.expenseKind,
+      });
+    paidBy[
+      category === "inventory"
+        ? "inventory"
+        : category === "salary"
+          ? "salary"
+          : "other"
+    ] += Number(p.amount || 0);
+  }
   const outstanding = money(rows.reduce((n, h) => n + h.outstanding, 0));
   return {
     month,
@@ -213,6 +276,9 @@ export function financialSummary(s: State, month: string) {
     plannedPayments,
     fundingBalance: money(revenue - plannedPayments),
     paid,
+    inventoryPaid: money(paidBy.inventory),
+    salaryPaid: money(paidBy.salary),
+    otherPaid: money(paidBy.other),
     operatingBalance: money(revenue - total),
     cashBalance: money(base.collected - paid),
     outstanding,
@@ -224,7 +290,9 @@ export function financialSummary(s: State, month: string) {
       (p) => p.status !== "void" && day(p.paidAt).slice(0, 7) === month,
     ).length,
     unpaidExpenseCount: s.expenses.filter(
-      (e) => monthlyExpense(e, month) > expensePaid(s, e.id, month),
+      (e) =>
+        !coveredFeedPlan(s, e, month) &&
+        monthlyExpense(e, month) > expensePaid(s, e.id, month),
     ).length,
     horses: rows,
   };

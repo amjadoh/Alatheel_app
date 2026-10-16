@@ -53,6 +53,7 @@ const needs: Record<string, Collection[]> = {
   "meal.save": ["mealTypes"],
   "meal.delete": ["mealTypes", "horses"],
   "stock.move": ["mealTypes"],
+  "stock.purchase": ["mealTypes"],
   "expense.save": ["expenses", "horses", "mealTypes", "expensePayments"],
   "expense.delete": ["expenses", "expensePayments"],
   "expense.pay": ["expenses", "expensePayments"],
@@ -70,6 +71,35 @@ const needs: Record<string, Collection[]> = {
   "profile.save": ["users"],
   "settings.save": ["settings"],
 };
+// Financial mutations and rollover must see one transactional basis.
+for (const action of [
+  "stock.purchase",
+  "finance.rollover",
+  "finance.snapshot",
+  "horse.save",
+  "horse.checkout",
+  "horse.restore",
+  "request.accept",
+  "meal.save",
+  "meal.delete",
+  "expense.save",
+  "expense.delete",
+  "expense.pay",
+  "expense.payment.void",
+  "income.pay",
+  "income.collect",
+])
+  needs[action] = [
+    ...new Set([
+      ...(needs[action] || []),
+      "horses",
+      "mealTypes",
+      "expenses",
+      "income",
+      "expensePayments",
+      "financialPeriods",
+    ]),
+  ] as Collection[];
 async function verifiedGoogle(request: { auth?: { uid: string; token: any } }) {
   if (!request.auth)
     throw new HttpsError("unauthenticated", "سجل الدخول بحساب Google أولًا");
