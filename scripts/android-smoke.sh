@@ -58,4 +58,3 @@ grep -Fq 'com.alatheel.stable' android-qa/window.xml
 if grep -Fq 'تعذر التحقق' android-qa/window.xml; then cat android-qa/dns-check.txt android-qa/ip-check.txt android-qa/host-dns.txt; grep -E -A 8 'AlatheelUpdater|UnknownHost|DnsResolver|SSL|Network is unreachable' android-qa/app-log.txt || true; exit 1; fi
 grep -Eq 'Google|قوقل' android-qa/window.xml
 printf 'Signed APK installed and reached the Google sign-in screen without an Android crash. Authentication was not attempted.\n' > android-qa/result.txt
-
