@@ -54,11 +54,19 @@ export function expensePaid(s: State, expenseId: string, period: string) {
   );
 }
 export function expensePlan(s: State, expense: Row, period: string) {
-  const closed = s.financialPeriods?.find((p) => p.id === period && p.closed);
-  const record = closed
-    ? closed.basis?.expenses.find((e: Row) => e.id === expense.id)
-    : expense;
+  const record = expensePeriodState(s, period).expenses.find(
+    (e) => e.id === expense.id,
+  );
   return record ? monthlyExpense(record, period) : 0;
+}
+/** Historic definitions stay frozen; later settlements remain visible in the payable ledger. */
+export function expensePeriodState(s: State, period: string): State {
+  const basis = s.financialPeriods?.find(
+    (p) => p.id === period && p.closed,
+  )?.basis;
+  return basis
+    ? { ...s, ...basis, expensePayments: s.expensePayments, income: s.income }
+    : s;
 }
 export function horseFinance(s: State, h: Row, month: string) {
   const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);

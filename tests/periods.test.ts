@@ -315,6 +315,58 @@ test("paying an older expense uses its closed-month price, independently of curr
   assert.equal(financialSummary(s, "2026-10").paid, 100);
   assert.deepEqual(financialSummary(s, "2026-09"), before);
 });
+test("a deleted recurring expense can still be settled for its frozen month without reactivating the recurring expense", () => {
+  let s = run(seed(), "2026-09-15");
+  s = run(s, "2026-10-02", "expense.delete", "salary");
+  const before = structuredClone(
+    s.financialPeriods.find((p) => p.id === "2026-09"),
+  );
+  assert.equal(s.expenses.length, 0);
+  s = run(s, "2026-10-03", "expense.pay", "salary", {
+    period: "2026-09",
+    paidAt: "2026-10-03",
+    amount: 100,
+    expectedRemaining: 100,
+  });
+  assert.equal(s.expenses.length, 0);
+  assert.equal(s.expensePayments[0].amount, 100);
+  assert.equal(financialSummary(s, "2026-10").paid, 100);
+  assert.equal(financialSummary(s, "2026-10").other, 0);
+  assert.deepEqual(
+    s.financialPeriods.find((p) => p.id === "2026-09"),
+    before,
+  );
+});
+
+test("late expense settlement uses the frozen name and category, while later definitions stay independent", () => {
+  const base = seed();
+  base.expenses[0].expenseCategory = "salary";
+  let s = run(base, "2026-09-15");
+  s = run(s, "2026-10-02", "expense.save", "salary", {
+    ...s.expenses[0],
+    name: "مصروف آخر",
+    expenseCategory: "other",
+    cost: 200,
+  });
+  const before = structuredClone(
+    s.financialPeriods.find((p) => p.id === "2026-09"),
+  );
+  s = run(s, "2026-10-03", "expense.pay", "salary", {
+    period: "2026-09",
+    paidAt: "2026-10-03",
+    amount: 100,
+    expectedRemaining: 100,
+  });
+  assert.equal(s.expensePayments[0].expenseName, base.expenses[0].name);
+  assert.equal(s.expensePayments[0].cashCategory, "salary");
+  assert.equal(financialSummary(s, "2026-10").salaryPaid, 100);
+  assert.equal(financialSummary(s, "2026-10").otherPaid, 0);
+  assert.deepEqual(
+    s.financialPeriods.find((p) => p.id === "2026-09"),
+    before,
+  );
+});
+
 test("shared salary stays allocated to horses present in the closed month after later departures", () => {
   const base = seed();
   base.horses.push({ ...base.horses[0], id: "h2" });

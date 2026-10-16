@@ -85,6 +85,33 @@ s.expenses = [
     chargedTo: "stable",
   },
 ];
+if (
+  new URLSearchParams(location.search).get("scenario") === "closed-expenses"
+) {
+  s = applyCommand(
+    s,
+    a,
+    { action: "finance.rollover", requestId: "qa_september" },
+    "2026-09-16T12:00:00Z",
+  );
+  s = applyCommand(
+    s,
+    a,
+    {
+      action: "expense.save",
+      id: "salary",
+      requestId: "qa_october_change",
+      data: {
+        ...s.expenses[0],
+        name: "تشغيل جديد",
+        cost: 2000,
+        expenseCategory: "other",
+        chargedTo: "stable",
+      },
+    },
+    "2026-10-16T12:00:00Z",
+  );
+}
 let emit: (s: State, a: Actor | null, error?: string) => void = () => {};
 export const inspectQA = () => structuredClone(s);
 (window as any).__alatheelQA = inspectQA;

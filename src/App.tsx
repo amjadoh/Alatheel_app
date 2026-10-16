@@ -63,10 +63,12 @@ import {
   horseFinance,
   expensePaid,
   expensePlan,
+  expensePeriodState,
 } from "../functions/src/finance";
 import { prepareHorsePhoto } from "./horse-photo";
 import { businessDay } from "../functions/src/dates";
 import { similarItems } from "../functions/src/inventory";
+import { stayDays } from "../functions/src/boarding";
 import {
   RELEASE_VERSION,
   RELEASE_NOTES,
@@ -244,6 +246,13 @@ export default function App() {
     name = s.settings[0]?.stableName || "إسطبل الأثيل",
     active = s.horses.filter((h) => h.status !== "archived"),
     stats = costs(s, month),
+    expenseState = expensePeriodState(s, month),
+    expenseMonthClosed = s.financialPeriods.some(
+      (p) => p.id === month && p.closed,
+    ),
+    expenseHorseCount = expenseState.horses.filter(
+      (h) => stayDays(h, month) > 0,
+    ).length,
     filtered = (rows: Row[], fields: string[]) =>
       rows.filter((r) =>
         fields.some((k) => String(r[k] || "").includes(search)),
@@ -1881,6 +1890,7 @@ export default function App() {
                   <button
                     className="round-add"
                     aria-label="إضافة مصروف"
+                    disabled={expenseMonthClosed}
                     onClick={() => expenseForm()}
                   >
                     <Plus />
@@ -1897,7 +1907,14 @@ export default function App() {
                     }
                   />
                 </label>
-                {s.expenses.map((e) => (
+                {expenseMonthClosed && (
+                  <p className="notice">
+                    هذا الشهر محفوظ؛ تظهر تفاصيل المصروفات وقت إغلاقه. يمكن
+                    تسجيل سداد المتبقي بتاريخ اليوم دون تغيير أرقام الشهر
+                    المغلق.
+                  </p>
+                )}
+                {expenseState.expenses.map((e) => (
                   <section className="card" key={e.id}>
                     <div className="spread">
                       <h2>{e.name}</h2>
@@ -1909,21 +1926,24 @@ export default function App() {
                         ? e.horseIds
                             .map(
                               (id: string) =>
-                                s.horses.find((h) => h.id === id)?.name || id,
+                                expenseState.horses.find((h) => h.id === id)
+                                  ?.name || id,
                             )
                             .join("، ")
                         : "موزع على جميع الخيل النشطة"}
                     </p>
                     <p className="muted small">
-                      {isFeedPurchase(s, e) ? "مشتريات العلف في" : "تكلفة"}{" "}
+                      {isFeedPurchase(expenseState, e)
+                        ? "مشتريات العلف في"
+                        : "تكلفة"}{" "}
                       {month}: {money(expensePlan(s, e, month))} ر.س{" "}
                       {expenseIsShared(e)
-                        ? active.length
-                          ? `÷ ${active.length} خيل نشطة`
+                        ? expenseHorseCount
+                          ? `÷ ${expenseHorseCount} خيل خلال الشهر`
                           : "بانتظار إضافة خيل نشطة لتوزيعه"
                         : "على الخيل المرتبطة"}
                     </p>
-                    {isFeedPurchase(s, e) && (
+                    {isFeedPurchase(expenseState, e) && (
                       <p className="notice">
                         شراء علف: يظهر منفصلًا. تكلفة التغذية تعتمد على كمية
                         الاستهلاك المسجلة لكل خيل ولا تكرر قيمة الشراء.
@@ -1946,20 +1966,21 @@ export default function App() {
                         ر.س
                       </b>
                     </div>
-                    {!coveredFeedPlan(s, e, month) &&
+                    {!coveredFeedPlan(expenseState, e, month) &&
                       expensePlan(s, e, month) >
                         expensePaid(s, e.id, month) && (
                         <Button kind="gold" onClick={() => payExpense(e)}>
                           تسجيل سداد مصروف
                         </Button>
                       )}
-                    {coveredFeedPlan(s, e, month) && (
+                    {coveredFeedPlan(expenseState, e, month) && (
                       <p className="notice small">
                         خطة شراء يغطيها الشراء المسجل من المخزون؛ لا تسددها مرة
                         ثانية.
                       </p>
                     )}
-                    {e.collectedHorseIds?.length > 0 ||
+                    {expenseMonthClosed ||
+                    e.collectedHorseIds?.length > 0 ||
                     s.expensePayments.some((p) => p.expenseId === e.id) ? (
                       <p className="notice">
                         مرتبط بسجلات مالية؛ يحتفظ السجل بالتكلفة والتوزيع

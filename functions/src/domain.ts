@@ -4,6 +4,7 @@ import { monthlyExpense } from "./estimates";
 import {
   expensePaid,
   expensePlan,
+  expensePeriodState,
   financialSummary,
   cashCategory,
 } from "./finance";
@@ -732,13 +733,15 @@ export function applyCommand(
       s.expenses = s.expenses.filter((e) => e.id !== id);
       break;
     case "expense.pay": {
-      const e = find(s, "expenses", id);
-      const meal = expenseFeedMeal(e, s.mealTypes);
+      const period = required(d.period, "شهر المصروف");
+      const definitions = expensePeriodState(s, period);
+      const e = find(definitions, "expenses", id);
+      const meal = expenseFeedMeal(e, definitions.mealTypes);
       ensure(
         !(
           meal &&
           e.frequency !== "once" &&
-          s.expenses.some(
+          definitions.expenses.some(
             (x) =>
               x.stockTransactionId &&
               x.mealTypeId === meal.id &&
@@ -747,7 +750,6 @@ export function applyCommand(
         ),
         "شراء هذا الصنف يسجل ويسدد من المخزون؛ لا تسدد خطة الشراء مرة ثانية",
       );
-      const period = required(d.period, "شهر المصروف");
       const planned = expensePlan(s, e, period);
       const remaining = money(planned - expensePaid(s, e.id, period));
       ensure(remaining > 0, "هذا المصروف مسدد بالكامل لهذه الفترة");
@@ -763,7 +765,8 @@ export function applyCommand(
       const paidAt = date(d.paidAt);
       assertOpenPeriod(s, paidAt);
       ensure(paidAt <= today, "لا يمكن تسجيل سداد بتاريخ مستقبلي");
-      e.lockedForPayments = true;
+      const currentExpense = s.expenses.find((x) => x.id === id);
+      if (currentExpense) currentExpense.lockedForPayments = true;
       s.expensePayments.push({
         id: c.requestId,
         expenseId: e.id,
