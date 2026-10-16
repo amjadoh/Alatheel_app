@@ -137,9 +137,9 @@ service cloud.firestore {
     match /horses/{horseId} {
       allow get: if isEmployee() || isHorseOwner(existing());
       allow list: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
-      allow create: if isEmployee() && isValidHorse(incoming());
-      allow update: if isEmployee() && isValidHorse(incoming());
-      allow delete: if isAdmin();
+      allow create: if isEmployee() && isValidHorse(incoming()) && !incoming().keys().hasAny(['accountVersion','accountAnchor','accountCycles','accountExtras']);
+      allow update: if isEmployee() && isValidHorse(incoming()) && !incoming().diff(existing()).affectedKeys().hasAny(['accountVersion','accountAnchor','accountCycles','accountExtras']) && (existing().get('accountVersion',0) != 1 || !incoming().diff(existing()).affectedKeys().hasAny(['dueDate','boardingFee','ownerId']));
+      allow delete: if isAdmin() && existing().get('accountVersion',0) != 1;
     }
 
     // 3. Meal Types & Inventory
@@ -178,8 +178,8 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if isEmployee() || ((isOwner() || isViewer()) && request.auth.uid in resource.data.get('horseIds', []));
       allow create: if isEmployee() && isValidExpense(incoming());
-      allow update: if isEmployee() && isValidExpense(incoming()) && !existing().get('lockedForPayments', false);
-      allow delete: if isAdmin() && !existing().get('lockedForPayments', false);
+      allow update: if isEmployee() && isValidExpense(incoming()) && !existing().get('lockedForPayments', false) && !existing().get('lockedForReceipts',false);
+      allow delete: if isAdmin() && !existing().get('lockedForPayments', false) && !existing().get('lockedForReceipts',false);
     }
     // 4. Settings Collection (Stable Identity)
     match /expensePayments/{paymentId} {
@@ -205,9 +205,9 @@ service cloud.firestore {
     // 10. Incomes Collection
     match /incomes/{incomeId} {
       allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
-      allow create: if isEmployee() && isValidIncome(incoming());
-      allow update: if isEmployee() && isValidIncome(incoming());
-      allow delete: if isAdmin();
+      allow create: if isEmployee() && isValidIncome(incoming()) && !incoming().keys().hasAny(['accountVersion']) && get(/databases/$(database)/documents/horses/$(incoming().horseId)).data.get('accountVersion',0) != 1;
+      allow update: if isEmployee() && isValidIncome(incoming()) && existing().get('accountVersion',0) != 1 && !incoming().keys().hasAny(['accountVersion']);
+      allow delete: if isAdmin() && existing().get('accountVersion',0) != 1;
     }
 
     match /income/{incomeId} {

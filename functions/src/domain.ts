@@ -3,6 +3,7 @@ import { feedingMeasure, expenseFeedMeal } from "./feeding";
 import { monthlyExpense } from "./estimates";
 import { expensePaid, financialSummary } from "./finance";
 import { businessDay } from "./dates";
+import { horseAccount, planPayment, accountRevision } from "./accounts";
 export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
@@ -284,12 +285,41 @@ export function applyCommand(
       );
       const feeding = (d.feeding ?? []).map((f: any) => {
         find(s, "mealTypes", f.mealTypeId);
+        const frequency = f.frequency || "daily";
+        ensure(["daily", "monthly"].includes(frequency), "حدد تكرار التغذية");
+        const timesPerMonth =
+          frequency === "monthly"
+            ? num(f.timesPerMonth, "عدد مرات التغذية بالشهر", 1)
+            : 0;
+        ensure(
+          Number.isInteger(timesPerMonth) && timesPerMonth <= 1000,
+          "عدد مرات التغذية يجب أن يكون عددًا صحيحًا لا يتجاوز 1000",
+        );
         return {
           mealTypeId: f.mealTypeId,
-          quantity: num(f.quantity, "كمية التغذية", 0.01),
+          quantity: num(f.quantity, "كمية التغذية", 0.001),
+          frequency,
+          ...(frequency === "monthly" ? { timesPerMonth } : {}),
         };
       });
       ensure(feeding.length <= 20, "الحد الأقصى 20 نوع تغذية");
+      if (old?.accountVersion) {
+        ensure(
+          d.status !== "private",
+          "الخيل مرتبط بكشف حساب؛ استخدم إخراج الخيل لإيقاف الإيواء مع حفظ مستحقاته",
+        );
+        ensure(
+          d.dueDate === old.dueDate,
+          "موعد الاستحقاق يحدّث من كشف الحساب بعد تسجيل الدفعات",
+        );
+        ensure(
+          d.ownerId === old.ownerId,
+          "الخيل مرتبط بكشف حساب؛ لا يمكن تغيير المالك مباشرة",
+        );
+        old.accountCycles = horseAccount(s, old, today)
+          .items.filter((x) => x.kind === "boarding")
+          .map((x) => ({ dueDate: x.dueDate, amount: x.amount }));
+      }
       put(s, "horses", {
         ...old,
         id,
@@ -400,7 +430,7 @@ export function applyCommand(
         "المصروف مرتبط بسداد؛ أنشئ مصروفًا جديدًا للتغييرات",
       );
       ensure(
-        !old?.collectedHorseIds?.length,
+        !old?.collectedHorseIds?.length && !old?.lockedForReceipts,
         "لا يمكن تعديل مصروف تم تحصيل جزء منه",
       );
       ensure(
@@ -481,7 +511,8 @@ export function applyCommand(
         "المصروف مرتبط بسجلات سداد ولا يمكن حذفه",
       );
       ensure(
-        !find(s, "expenses", id).collectedHorseIds?.length,
+        !find(s, "expenses", id).collectedHorseIds?.length &&
+          !find(s, "expenses", id).lockedForReceipts,
         "المصروف مرتبط بتحصيل ولا يمكن حذفه",
       );
       s.expenses = s.expenses.filter((e) => e.id !== id);
@@ -552,8 +583,135 @@ export function applyCommand(
       });
       break;
     }
+    case "income.pay": {
+      const h = find(s, "horses", id);
+      ensure(
+        ["boarding", "boarding_breeding", "archived"].includes(h.status) &&
+          h.previousStatus !== "private",
+        "الخيل غير مشمول بالتحصيل",
+      );
+      ensure(
+        d.expectedRevision === accountRevision(s, h),
+        "تغير كشف الحساب؛ حدّث الشاشة قبل تسجيل الدفعة",
+      );
+      ensure(
+        ["partial", "monthly", "arrears"].includes(d.paymentType),
+        "حدد نوع الدفعة",
+      );
+      const paidAt = date(d.paidAt);
+      ensure(paidAt <= today, "لا يمكن تسجيل دفعة بتاريخ مستقبلي");
+      ensure(
+        !h.entryDate || paidAt >= h.entryDate,
+        "تاريخ الدفع يسبق دخول الخيل",
+      );
+      const amount = money(num(d.amount, "المبلغ المستلم", 0.01));
+      ensure(amount <= 1000000, "المبلغ يتجاوز حد الدفعة");
+      ensure(
+        ["bank", "cash", "card", "other"].includes(d.method),
+        "حدد طريقة الدفع",
+      );
+      ensure(
+        Array.isArray(d.periods || []) && (d.periods || []).length <= 120,
+        "الأشهر المحددة غير صحيحة",
+      );
+      const plan = planPayment(s, h, { ...d, amount }, today);
+      if (d.paymentType === "monthly")
+        ensure(
+          plan.selectedBalance > 0 && amount === plan.selectedBalance,
+          "ادفع المتبقي من استحقاق الشهر المحدد من تاريخ الدفع",
+        );
+      if (d.paymentType === "arrears") {
+        ensure(
+          d.periods?.length &&
+            d.periods.every(
+              (m: any) =>
+                typeof m === "string" &&
+                /^\d{4}-(0[1-9]|1[0-2])$/.test(m) &&
+                m < paidAt.slice(0, 7),
+            ),
+          "اختر أشهرًا سابقة لتاريخ الدفع",
+        );
+        ensure(
+          plan.selectedBalance > 0 && amount <= plan.selectedBalance,
+          "المبلغ يتجاوز متبقي الأشهر المحددة",
+        );
+      }
+      ensure(h.accountAnchor || h.dueDate, "حدد موعد الاستحقاق الأول للخيل");
+      h.accountAnchor = h.accountAnchor || h.dueDate;
+      h.accountVersion = 1;
+      h.accountCycles = plan.account.items
+        .filter((x) => x.kind === "boarding")
+        .map((x) => ({ dueDate: x.dueDate, amount: x.amount }));
+      s.income.push({
+        id: c.requestId,
+        horseId: h.id,
+        horseName: h.name,
+        ownerId: h.ownerId,
+        ownerName: h.ownerName || "",
+        amount,
+        accountVersion: 1,
+        paymentType: d.paymentType,
+        allocations: plan.allocations,
+        advanceAmount: plan.advance,
+        boardingFee: money(
+          plan.allocations
+            .filter((x) => x.kind === "boarding")
+            .reduce((n, x) => n + x.amount, 0),
+        ),
+        expenseShares: plan.allocations
+          .filter((x) => x.kind === "expense")
+          .map((x) => ({
+            expenseId: x.expenseId,
+            name: x.name,
+            amount: x.amount,
+          })),
+        dueDate: plan.allocations[0]?.dueDate || paidAt,
+        collectedAt: paidAt + "T09:00:00.000Z",
+        paidAt,
+        method: d.method,
+        notes: text(d.notes),
+        status: "collected",
+        month: Number(paidAt.slice(5, 7)),
+        year: Number(paidAt.slice(0, 4)),
+        createdAt: now,
+        performedBy: a.uid,
+      });
+      const after = horseAccount(s, h, today);
+      for (const item of after.items.filter((x) => x.kind === "expense")) {
+        const e = s.expenses.find((e) => e.id === item.expenseId);
+        if (!e) continue;
+        if (item.paid > 0) e.lockedForReceipts = true;
+        if (item.remaining === 0)
+          e.collectedHorseIds = [
+            ...new Set([...(e.collectedHorseIds || []), h.id]),
+          ];
+      }
+      h.accountExtras = after.items
+        .filter((x) => x.kind === "expense")
+        .map((x) => ({
+          id: x.id,
+          expenseId: x.expenseId,
+          dueDate: x.dueDate,
+          name: x.name,
+          amount: x.amount,
+        }));
+      const unpaid = after.items.find(
+        (x) => x.kind === "boarding" && x.remaining > 0,
+      );
+      const last =
+        after.items.filter((x) => x.kind === "boarding").at(-1)?.dueDate ||
+        h.accountAnchor;
+      h.dueDate = unpaid?.dueDate || nextMonth(last);
+      h.updatedAt = now;
+      ownerId = h.ownerId;
+      break;
+    }
     case "income.collect": {
       const h = find(s, "horses", id);
+      ensure(
+        !h.accountVersion,
+        "هذا الخيل يستخدم كشف الحساب الجديد؛ حدّث التطبيق لتسجيل الدفعات",
+      );
       ensure(
         ["boarding", "boarding_breeding"].includes(h.status),
         "الخيل غير مشمول بالتحصيل",

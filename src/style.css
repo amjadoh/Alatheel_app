@@ -1166,6 +1166,49 @@ legend {
   font-size: 12px;
   font-weight: 800;
 }
+.account-cycle,
+.account-receipt {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.account-receipt summary {
+  padding: 8px 0;
+  cursor: pointer;
+}
+.account-balance {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 20px;
+  border-radius: 18px;
+  margin: 16px 0;
+}
+.account-totals {
+  display: flex;
+  gap: 16px;
+  margin: 18px 0;
+  flex-wrap: wrap;
+}
+.account-totals b {
+  display: block;
+  font-size: 1.3em;
+}
+.account-types {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.account-types .button {
+  flex: 1;
+  min-width: 100px;
+  padding: 10px;
+}
+.feeding-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin: 12px 0;
+}
 .feeding-row {
   display: grid;
   grid-template-columns: 1fr 75px 32px;

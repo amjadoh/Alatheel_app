@@ -36,6 +36,8 @@ import {
   bill,
   nextMonth,
 } from "./service";
+import { HorseAccount, ReceiptDetails } from "./account-ui";
+import { horseAccount } from "../functions/src/accounts";
 import { emptyState } from "../functions/src/domain";
 import {
   costs,
@@ -157,6 +159,7 @@ export default function App() {
     [horseFilter, setHorseFilter] = useState("all"),
     [month, setMonth] = useState(today().slice(0, 7)),
     [incomeTab, setIncomeTab] = useState("pending"),
+    [accountHorseId, setAccountHorseId] = useState<string | null>(null),
     [loginOpen, setLoginOpen] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
   const mainRef = useRef<HTMLElement>(null),
@@ -174,6 +177,7 @@ export default function App() {
           setDetail(null);
           setSearch("");
           setLoginOpen(false);
+          setAccountHorseId(null);
           prevUid.current = actor?.uid || null;
         }
       }),
@@ -196,7 +200,8 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const handle = NativeApp.addListener("backButton", () => {
-      if (form) setForm(null);
+      if (accountHorseId) setAccountHorseId(null);
+      else if (form) setForm(null);
       else if (detail) setDetail(null);
       else if (tab !== "dashboard") setTab("dashboard");
       else void NativeApp.minimizeApp();
@@ -204,7 +209,7 @@ export default function App() {
     return () => {
       void handle.then((h) => h.remove());
     };
-  }, [form, detail, tab]);
+  }, [form, detail, tab, accountHorseId]);
   const isStaff = !!a && staff(a),
     isAdmin = a?.role === "admin",
     name = s.settings[0]?.stableName || "إسطبل الأثيل",
@@ -680,8 +685,11 @@ export default function App() {
               </p>
               {c.foodItems.map((f: any, i: number) => (
                 <p className="small" key={`food-${i}`}>
-                  {f.name}: {f.quantity} {f.unit}/يوم × {money(f.rate)} ر.س ×{" "}
-                  {c.days} يومًا = {money(f.amount)} ر.س
+                  {f.name}: {f.quantity} {f.unit}
+                  {f.frequency === "monthly" ? "/مرة" : "/يوم"} ×{" "}
+                  {money(f.rate)} ر.س × {f.count}{" "}
+                  {f.frequency === "monthly" ? "مرات بالشهر" : "يومًا"} ={" "}
+                  {money(f.amount)} ر.س
                 </p>
               ))}
               {c.expenseItems.map((e, i) => (
@@ -700,14 +708,17 @@ export default function App() {
               </small>
               {c.missingFeed.map((item) => (
                 <p className="small" key={item}>
-                  تنبيه: توجد مشتريات «{item}» ولا توجد كمية يومية مسجلة لهذا
+                  تنبيه: توجد مشتريات «{item}» ولا توجد كمية تغذية مسجلة لهذا
                   الخيل؛ لم تُضف تكلفة استهلاكه لهذا الصنف.
                 </p>
               ))}
             </div>
           )}
           <p>{h.notes || "لا توجد ملاحظات"}</p>
-          <h3>التغذية اليومية</h3>
+          <Button kind="outline" onClick={() => collect(h)}>
+            كشف حساب الخيل وسجل المدفوعات
+          </Button>
+          <h3>برنامج التغذية</h3>
           {h.feeding?.length ? (
             h.feeding.map((f: any, i: number) => (
               <p key={i}>
@@ -719,7 +730,9 @@ export default function App() {
                     s.mealTypes.find((m) => m.id === f.mealTypeId) || {},
                   ).unit
                 }{" "}
-                يوميًا
+                {f.frequency === "monthly"
+                  ? `في المرة × ${f.timesPerMonth} مرات بالشهر`
+                  : "يوميًا"}
               </p>
             ))
           ) : (
@@ -855,48 +868,8 @@ export default function App() {
     }
   }, [a?.uid, s.horses.length]);
   const collect = (h: Row) => {
-    const b = bill(s, h);
-    setDetail({
-      title: "تأكيد التحصيل",
-      content: (
-        <>
-          <p className="eyebrow">
-            {h.name} · {h.ownerName}
-          </p>
-          <div className="big-number">
-            {money(b.amount)} <small>ر.س</small>
-          </div>
-          <dl>
-            <dt>رسوم الإيواء</dt>
-            <dd>{money(h.boardingFee)}</dd>
-            {b.extras.map((e) => (
-              <div className="dl-row" key={e.id}>
-                <dt>{e.name}</dt>
-                <dd>{money(e.allocations[h.id])}</dd>
-              </div>
-            ))}
-            <dt>الاستحقاق الحالي</dt>
-            <dd>{h.dueDate}</dd>
-            <dt>الاستحقاق التالي</dt>
-            <dd>{h.dueDate ? nextMonth(h.dueDate) : "غير محدد"}</dd>
-          </dl>
-          <p className="muted">
-            يسجل السداد ويحدث الاستحقاق شهرًا واحدًا من موعده الحالي.
-          </p>
-          <Button
-            kind="gold"
-            onClick={() =>
-              perform("income.collect", h.id, {
-                expectedDueDate: h.dueDate,
-                expectedAmount: b.amount,
-              })
-            }
-          >
-            تأكيد استلام المبلغ
-          </Button>
-        </>
-      ),
-    });
+    setDetail(null);
+    setAccountHorseId(h.id);
   };
   const nav = isStaff
     ? [
@@ -1630,7 +1603,7 @@ export default function App() {
                           {h.ownerName} · {h.dueDate || "حدد تاريخ الاستحقاق"}
                         </p>
                         <div className="big-number">
-                          {money(isStaff ? bill(s, h).amount : h.boardingFee)}{" "}
+                          {money(horseAccount(s, h, today()).outstanding)}{" "}
                           <small>ر.س</small>
                         </div>
                         {isStaff ? (
@@ -1639,7 +1612,7 @@ export default function App() {
                             disabled={!h.dueDate}
                             onClick={() => collect(h)}
                           >
-                            تسجيل التحصيل
+                            كشف الحساب وتسجيل دفعة
                           </Button>
                         ) : (
                           <p className="muted small">
@@ -1675,8 +1648,9 @@ export default function App() {
                           </div>
                           <p className="muted small">
                             الاستحقاق {i.dueDate} · التحصيل{" "}
-                            {String(i.collectedAt).slice(0, 10)}
+                            {businessDay(i.collectedAt)}
                           </p>
+                          <ReceiptDetails receipt={i} />
                           {i.expenseShares?.map((e: any) => (
                             <p className="small" key={e.expenseId}>
                               {e.name}: {money(e.amount)} ر.س
@@ -2224,7 +2198,7 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.5.0 · أندرويد
+                  الأثيل · الإصدار 1.6.0 · أندرويد
                 </p>
                 <UpdateButton />
               </>
@@ -2301,6 +2275,32 @@ export default function App() {
               onSubmit={(d) => void run(() => form.submit(d))}
             />
           </>
+        </Modal>
+      )}
+      {accountHorseId && s.horses.some((h) => h.id === accountHorseId) && (
+        <Modal
+          title="كشف حساب الخيل"
+          close={() => !busy && setAccountHorseId(null)}
+        >
+          <HorseAccount
+            key={accountHorseId}
+            state={s}
+            horse={s.horses.find((h) => h.id === accountHorseId)!}
+            canPay={isStaff && a?.dataReady !== false}
+            onPay={async (data) => {
+              setBusy(true);
+              try {
+                await execute({
+                  action: "income.pay",
+                  id: accountHorseId,
+                  data,
+                });
+                setToast("تم تسجيل الدفعة وتوزيعها على الاستحقاقات");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
         </Modal>
       )}
       {detail && (
@@ -2491,64 +2491,102 @@ function FormView({
         ))}
       {form.feeding && (
         <fieldset>
-          <legend>برنامج التغذية اليومي</legend>
+          <legend>برنامج التغذية</legend>
           <p className="muted small">
-            أدخل إجمالي كمية اليوم بوحدة التغذية الظاهرة بجانب الصنف. المركزات
-            بالكجم؛ تكلفة الكيس تحوّل تلقائيًا حسب وزنه.
+            اختر يوميًا وأدخل إجمالي كمية اليوم، أو عدد مرات بالشهر وأدخل كمية
+            المرة وعدد المرات. وحدة الاستهلاك وسعرها من المخزون.
           </p>
-          {(v.feeding || []).map((f: any, i: number) => (
-            <div className="feeding-row" key={i}>
-              <select
-                aria-label={`نوع التغذية ${i + 1}`}
-                required
-                value={f.mealTypeId}
-                onChange={(e) =>
-                  update(
-                    "feeding",
-                    v.feeding.map((x: any, j: number) =>
-                      i === j ? { ...x, mealTypeId: e.target.value } : x,
-                    ),
-                  )
-                }
-              >
-                {state.mealTypes.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} ({feedingMeasure(m).unit} يوميًا)
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label={`الكمية اليومية ${i + 1} (${feedingMeasure(state.mealTypes.find((m) => m.id === f.mealTypeId) || {}).unit})`}
-                title={`إجمالي كمية اليوم بوحدة ${feedingMeasure(state.mealTypes.find((m) => m.id === f.mealTypeId) || {}).unit}`}
-                type="number"
-                min="0.01"
-                step="0.01"
-                required
-                value={f.quantity}
-                onChange={(e) =>
-                  update(
-                    "feeding",
-                    v.feeding.map((x: any, j: number) =>
-                      i === j ? { ...x, quantity: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="إزالة التغذية"
-                onClick={() =>
-                  update(
-                    "feeding",
-                    v.feeding.filter((_: any, j: number) => i !== j),
-                  )
-                }
-              >
-                <X size={18} />
-              </button>
-            </div>
-          ))}
+          {(v.feeding || []).map((f: any, i: number) => {
+            const change = (values: Record<string, any>) =>
+              update(
+                "feeding",
+                v.feeding.map((x: any, j: number) =>
+                  i === j ? { ...x, ...values } : x,
+                ),
+              );
+            const unit = feedingMeasure(
+              state.mealTypes.find((m) => m.id === f.mealTypeId) || {},
+            ).unit;
+            return (
+              <div className="feeding-item" key={i}>
+                <label className="field">
+                  <span>الصنف</span>
+                  <select
+                    aria-label={`نوع التغذية ${i + 1}`}
+                    required
+                    value={f.mealTypeId}
+                    onChange={(e) => change({ mealTypeId: e.target.value })}
+                  >
+                    {state.mealTypes.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({feedingMeasure(m).unit})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>التكرار</span>
+                  <select
+                    aria-label={`تكرار التغذية ${i + 1}`}
+                    value={f.frequency || "daily"}
+                    onChange={(e) =>
+                      change({
+                        frequency: e.target.value,
+                        timesPerMonth: f.timesPerMonth || 7,
+                      })
+                    }
+                  >
+                    <option value="daily">يومي</option>
+                    <option value="monthly">عدد مرات بالشهر</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>
+                    {f.frequency === "monthly"
+                      ? "الكمية في المرة"
+                      : "إجمالي كمية اليوم"}{" "}
+                    ({unit})
+                  </span>
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    required
+                    value={f.quantity}
+                    onChange={(e) => change({ quantity: e.target.value })}
+                  />
+                </label>
+                {f.frequency === "monthly" && (
+                  <label className="field">
+                    <span>عدد المرات بالشهر</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      step="1"
+                      required
+                      value={f.timesPerMonth || ""}
+                      onChange={(e) =>
+                        change({ timesPerMonth: e.target.value })
+                      }
+                    />
+                  </label>
+                )}
+                <button
+                  type="button"
+                  className="button outline"
+                  onClick={() =>
+                    update(
+                      "feeding",
+                      v.feeding.filter((_: any, j: number) => i !== j),
+                    )
+                  }
+                >
+                  إزالة الصنف
+                </button>
+              </div>
+            );
+          })}
           <button
             type="button"
             className="button outline"
@@ -2556,7 +2594,11 @@ function FormView({
             onClick={() =>
               update("feeding", [
                 ...(v.feeding || []),
-                { mealTypeId: state.mealTypes[0]?.id, quantity: 1 },
+                {
+                  mealTypeId: state.mealTypes[0]?.id,
+                  quantity: 1,
+                  frequency: "daily",
+                },
               ])
             }
           >

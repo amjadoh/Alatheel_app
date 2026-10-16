@@ -40,7 +40,14 @@ const needs: Record<string, Collection[]> = {
   "request.create": [],
   "request.review": ["registrationRequests"],
   "request.accept": ["registrationRequests", "horses"],
-  "horse.save": ["horses", "owners", "users", "mealTypes"],
+  "horse.save": [
+    "horses",
+    "owners",
+    "users",
+    "mealTypes",
+    "income",
+    "expenses",
+  ],
   "horse.checkout": ["horses"],
   "horse.restore": ["horses"],
   "meal.save": ["mealTypes"],
@@ -59,6 +66,7 @@ const needs: Record<string, Collection[]> = {
     "financialReports",
   ],
   "income.collect": ["horses", "expenses", "income"],
+  "income.pay": ["horses", "expenses", "income"],
   "profile.save": ["users"],
   "settings.save": ["settings"],
 };
@@ -157,7 +165,7 @@ export const operate = onCall(options, async (request) => {
           normalizeRecord(name, doc.id, doc.data()),
         );
       }
-      if (c.action === "income.collect")
+      if (["income.collect", "income.pay"].includes(c.action))
         ensure(
           !state.expenses.some(
             (e) =>

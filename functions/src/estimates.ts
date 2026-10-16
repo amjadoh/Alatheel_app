@@ -59,8 +59,14 @@ function feedingItems(s: State, h: Row, days: number) {
       name: meal?.name || "صنف غير متاح",
       unit: meal ? feedingMeasure(meal).unit : "وحدة",
       quantity: Number(f.quantity),
+      frequency: f.frequency || "daily",
+      count: f.frequency === "monthly" ? Number(f.timesPerMonth) : days,
       rate,
-      amount: money(Number(f.quantity) * rate * days),
+      amount: money(
+        Number(f.quantity) *
+          rate *
+          (f.frequency === "monthly" ? Number(f.timesPerMonth) : days),
+      ),
     };
   });
 }

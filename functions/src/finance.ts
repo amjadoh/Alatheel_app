@@ -2,6 +2,7 @@ import { money, nextMonth } from "./domain";
 import type { State, Row } from "./domain";
 import { costs, horseCost, monthlyExpense, isFeedPurchase } from "./estimates";
 import { businessDay } from "./dates";
+import { horseAccount } from "./accounts";
 
 const collected = (i: Row) => i.status !== "pending" && i.status !== "void";
 const day = businessDay;
@@ -137,6 +138,21 @@ export function horseFinance(s: State, h: Row, month: string) {
   )
     missing.push("سعر أحد أصناف التغذية غير مسجل");
   const revenue = money(expected + recoveredExpected);
+  const account = h.accountVersion ? horseAccount(s, h, end, end) : null;
+  const ledgerBoarding = account
+    ? money(
+        account.items
+          .filter((x) => x.kind === "boarding")
+          .reduce((n, x) => n + x.remaining, 0),
+      )
+    : boardingOutstanding;
+  const ledgerExtras = account
+    ? money(
+        account.items
+          .filter((x) => x.kind === "expense")
+          .reduce((n, x) => n + x.remaining, 0),
+      )
+    : extrasOutstanding;
   return {
     id: h.id,
     name: h.name,
@@ -151,10 +167,15 @@ export function horseFinance(s: State, h: Row, month: string) {
     total,
     margin: money(revenue - total),
     cash,
-    boardingOutstanding,
-    extrasOutstanding,
-    outstanding: money(boardingOutstanding + extrasOutstanding),
-    overdueCycles: [...unpaid.keys()].filter((d) => d < start).length,
+    boardingOutstanding: ledgerBoarding,
+    extrasOutstanding: ledgerExtras,
+    outstanding: money(ledgerBoarding + ledgerExtras),
+    advanceCredit: account?.credit || 0,
+    overdueCycles: account
+      ? account.items.filter(
+          (x) => x.kind === "boarding" && x.remaining > 0 && x.dueDate < start,
+        ).length
+      : [...unpaid.keys()].filter((d) => d < start).length,
     missing: [...new Set(missing)],
     complete: missing.length === 0,
     foodItems: active ? c.foodItems : [],

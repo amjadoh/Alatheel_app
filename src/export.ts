@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { State } from "./service";
+import { businessDay } from "../functions/src/dates";
 import {
   financialSummary,
   horseFinance,
@@ -70,13 +71,42 @@ export async function exportExcel(
     ],
     [
       "التحصيل",
-      ["الخيل", "المالك", "المبلغ", "الاستحقاق", "التحصيل"],
+      [
+        "الخيل",
+        "المالك",
+        "المبلغ",
+        "الاستحقاق",
+        "التحصيل",
+        "نوع الدفعة",
+        "طريقة الدفع",
+        "رصيد مقدم وقت التسجيل",
+        "الملاحظة",
+        "الحالة",
+      ],
       s.income.map((i) => [
         i.horseName,
         i.ownerName,
         i.amount,
         i.dueDate,
         i.collectedAt,
+        (
+          {
+            partial: "دفع جزئي",
+            monthly: "دفع استحقاق الشهر",
+            arrears: "دفع متأخرات",
+          } as Record<string, string>
+        )[i.paymentType] || "تحصيل سابق",
+        (
+          {
+            bank: "تحويل بنكي",
+            cash: "نقدي",
+            card: "شبكة",
+            other: "أخرى",
+          } as Record<string, string>
+        )[i.method] || "",
+        i.advanceAmount || 0,
+        i.notes || "",
+        i.status,
       ]),
     ],
     [
@@ -124,6 +154,35 @@ export async function exportExcel(
       ]),
     ],
   ];
+  sheets.push([
+    "توزيع الدفعات",
+    ["السند", "الخيل", "تاريخ الدفع", "الاستحقاق", "النوع", "المبلغ"],
+    s.income.flatMap((i) =>
+      (i.allocations || []).map((x: any) => [
+        i.id,
+        i.horseName,
+        businessDay(i.collectedAt),
+        x.dueDate,
+        x.kind === "boarding" ? "إيواء" : x.name,
+        x.amount,
+      ]),
+    ),
+  ]);
+  if (includeFinancials)
+    sheets.push([
+      "برنامج التغذية",
+      ["الخيل", "الصنف", "الكمية", "التكرار", "عدد مرات الشهر", "تكلفة الشهر"],
+      s.horses.flatMap((h) =>
+        horseCost(s, h, month).foodItems.map((x: any) => [
+          h.name,
+          x.name,
+          x.quantity + " " + x.unit,
+          x.frequency === "monthly" ? "كمية المرة" : "إجمالي يومي",
+          x.count,
+          x.amount,
+        ]),
+      ),
+    ]);
   if (includeFinancials) {
     const f = financialSummary(s, month);
     sheets.unshift([

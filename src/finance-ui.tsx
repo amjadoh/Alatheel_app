@@ -432,9 +432,11 @@ export function FinancialDashboard({
               />
               {h.foodItems.map((item: any, i: number) => (
                 <p className="small" key={i}>
-                  {item.name}: {item.quantity} {item.unit}/يوم ×{" "}
-                  {amount(item.rate)} × {h.days} يومًا = {amount(item.amount)}{" "}
-                  ر.س
+                  {item.name}: {item.quantity} {item.unit}
+                  {item.frequency === "monthly" ? "/مرة" : "/يوم"} ×{" "}
+                  {amount(item.rate)} × {item.count ?? h.days}{" "}
+                  {item.frequency === "monthly" ? "مرات بالشهر" : "يومًا"} ={" "}
+                  {amount(item.amount)} ر.س
                 </p>
               ))}
               {h.expenseItems.map((item, i) => (
