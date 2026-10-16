@@ -1,0 +1,40 @@
+name: Android startup diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Android APK build run to test without publishing
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  startup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools emulator system-images;android-35;google_apis;x86_64"
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Alatheel-Android-Google
+          path: apk
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run }}
+      - name: Check startup without signing in or changing stable data
+        run: bash scripts/android-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Alatheel-Android-Startup-Diagnostics
+          path: android-qa/
+          retention-days: 7
+
