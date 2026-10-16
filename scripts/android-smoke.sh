@@ -3,8 +3,16 @@ set -euo pipefail
 mkdir -p android-qa
 test -e /dev/kvm
 sudo chmod 666 /dev/kvm
-echo no | avdmanager create avd --force --name alatheel-qa --package 'system-images;android-35;google_apis;x86_64'
+# Keep avdmanager and emulator on the same explicit configuration directory.
+# https://developer.android.com/tools/variables
+export ANDROID_USER_HOME="$RUNNER_TEMP/alatheel-android-user"
+export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+mkdir -p "$ANDROID_AVD_HOME"
+echo no | avdmanager create avd --force --name alatheel-qa --package 'system-images;android-35;google_apis;x86_64' --path "$ANDROID_AVD_HOME/alatheel-qa.avd"
+test -s "$ANDROID_AVD_HOME/alatheel-qa.ini"
 test -x "$ANDROID_HOME/emulator/emulator"
+"$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx alatheel-qa
 "$ANDROID_HOME/emulator/emulator" -avd alatheel-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > android-qa/emulator.log 2>&1 &
 EMULATOR_PID=$!
 trap 'kill "$EMULATOR_PID" 2>/dev/null || true' EXIT

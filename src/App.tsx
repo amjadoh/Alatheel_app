@@ -1288,12 +1288,18 @@ export default function App() {
                       >
                         <Users />
                         <span>
-                          {isStaff ? "الملاك" : "رسوم الإيواء الشهرية"}
+                          {isStaff ? "الملاك" : "الإيواء المتوقع خلال الفترة"}
                         </span>
                         <strong>
                           {isStaff
                             ? new Set(active.map((h) => h.ownerId)).size
-                            : money(stats.expected)}
+                            : money(
+                                s.horses.reduce(
+                                  (sum, h) =>
+                                    sum + horseFinance(s, h, month).expected,
+                                  0,
+                                ),
+                              )}
                         </strong>
                         <small>
                           {isStaff ? "أصحاب الخيل النشطة" : "ريال سعودي"}
