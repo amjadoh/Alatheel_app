@@ -117,7 +117,8 @@ export function horseAccount(
       let allocated = 0;
       for (const x of r.allocations || []) {
         paid.set(x.id, (paid.get(x.id) || 0) + cents(x.amount));
-        allocated += cents(x.amount);
+        // A cycle beyond checkout or beyond this report's horizon is still prepaid credit.
+        if (items.has(x.id)) allocated += cents(x.amount);
       }
       credit += Math.max(0, cents(r.amount) - allocated);
     } else {

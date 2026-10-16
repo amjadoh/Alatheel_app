@@ -256,6 +256,26 @@ test("changing a billed horse to private cannot silently erase its arrears", () 
     /إخراج الخيل/,
   );
 });
+test("paid future cycle remains a credit after checkout before its due date", () => {
+  const s = seed();
+  s.horses[0].dueDate = "2026-10-27";
+  const n = pay(s, { paymentType: "monthly", amount: 700 });
+  const out = applyCommand(
+    n,
+    admin,
+    {
+      action: "horse.checkout",
+      id: "h",
+      requestId: "checkout_with_credit",
+      data: { exitDate: "2026-10-20", exitReason: "customer_request" },
+    },
+    "2026-10-20T12:00:00Z",
+  );
+  const a = horseAccount(out, out.horses[0], "2026-10-20");
+  assert.equal(a.outstanding, 0);
+  assert.equal(a.credit, 700);
+  assert.equal(a.paid, 700);
+});
 test("daily legacy and seven monthly portions use independent multipliers including February", () => {
   const s = seed();
   s.mealTypes = [
