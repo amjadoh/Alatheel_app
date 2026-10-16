@@ -76,7 +76,7 @@ export function horseAccount(
     cursor = nextMonth(cursor);
   }
   // Legacy receipts retain their original fee and expense snapshots, including historical cutoffs.
-  for (const r of receipts.filter((r) => !r.accountVersion)) {
+  for (const r of receipts.filter((r) => !privateHorse && !r.accountVersion)) {
     const d = businessDay(r.dueDate);
     if (d && d <= stop)
       add({
@@ -101,7 +101,13 @@ export function horseAccount(
   for (const e of s.expenses) {
     const amount = Number(e.allocations?.[h.id] || 0),
       dueDate = businessDay(e.incurredAt || e.createdAt);
-    if (!amount || e.frequency !== "once" || !dueDate || dueDate > horizon)
+    if (
+      privateHorse ||
+      !amount ||
+      e.frequency !== "once" ||
+      !dueDate ||
+      dueDate > horizon
+    )
       continue;
     const legacy = receipts.some(
       (r) =>
@@ -121,7 +127,7 @@ export function horseAccount(
       remaining: 0,
     });
   }
-  for (const x of h.accountExtras || [])
+  for (const x of privateHorse ? [] : h.accountExtras || [])
     if (x.dueDate <= horizon)
       add({ ...x, kind: "expense", paid: 0, remaining: 0 });
   const paid = new Map<string, number>();

@@ -99,18 +99,19 @@ function calculateHorseFinance(s: State, h: Row, month: string) {
       .reduce((n, i) => n + Number(i.amount || 0), 0),
   );
   const expected = active && !privateHorse ? boardingAmount(h, month) : 0;
-  const recoveredExpected = active
-    ? money(
-        s.expenses
-          .filter(
-            (e) =>
-              !isFeedPurchase(s, e) &&
-              e.frequency === "once" &&
-              monthlyExpense(e, month) > 0,
-          )
-          .reduce((sum, e) => sum + Number(e.allocations?.[h.id] || 0), 0),
-      )
-    : 0;
+  const recoveredExpected =
+    active && !privateHorse
+      ? money(
+          s.expenses
+            .filter(
+              (e) =>
+                !isFeedPurchase(s, e) &&
+                e.frequency === "once" &&
+                monthlyExpense(e, month) > 0,
+            )
+            .reduce((sum, e) => sum + Number(e.allocations?.[h.id] || 0), 0),
+        )
+      : 0;
   const dueEnd =
     archived && h.exitDate ? [end, day(h.exitDate)].sort()[0] : end;
   // dueDate is the next unpaid cycle. Paid receipts after the selected cut-off

@@ -14,6 +14,7 @@ import {
 } from "../functions/src/finance";
 import { businessDay } from "../functions/src/dates";
 import { monthlyExpense } from "../functions/src/estimates";
+import { horseAccount } from "../functions/src/accounts";
 const admin: Actor = { uid: "admin", role: "admin", displayName: "المدير" };
 const employee: Actor = {
   uid: "staff",
@@ -436,6 +437,78 @@ test("a backdated one-off expense and its payment are assigned to their own peri
   assert.equal(financialSummary(s, "2026-09").paid, 0);
   assert.equal(financialSummary(s, "2026-10").paid, 100);
 });
+test("private horse legacy allocations remain stable costs without phantom owner debt or recoverable revenue", () => {
+  const s = emptyState();
+  s.horses = [
+    {
+      id: "private",
+      name: "ملك خاص",
+      status: "private",
+      boardingFee: 0,
+      entryDate: "2026-10-01",
+      dueDate: "2026-10-01",
+      feeding: [],
+    },
+  ];
+  s.expenses = [
+    {
+      id: "vet",
+      name: "طبيب",
+      cost: 300,
+      frequency: "once",
+      incurredAt: "2026-10-15",
+      expenseKind: "operating",
+      allocationScope: "selected",
+      horseIds: ["private"],
+      chargedTo: "owner",
+      allocations: { private: 300 },
+    },
+  ];
+  s.horses[0].accountExtras = [
+    { id: "legacy_extra", name: "قديم", dueDate: "2026-10-01", amount: 50 },
+  ];
+  assert.equal(horseAccount(s, s.horses[0], "2026-10-16").outstanding, 0);
+  const f = financialSummary(s, "2026-10");
+  assert.equal(f.total, 300);
+  assert.equal(f.recoveries, 0);
+  assert.equal(f.outstanding, 0);
+  assert.equal(f.debtCount, 0);
+});
+
+test("server rejects owner-recoverable expenses for private horses including archived private horses", () => {
+  for (const status of ["private", "archived"]) {
+    const s = emptyState();
+    s.horses = [
+      {
+        id: "private",
+        name: "ملك خاص",
+        status,
+        previousStatus: "private",
+        entryDate: "2026-10-01",
+      },
+    ];
+    assert.throws(
+      () =>
+        applyCommand(
+          s,
+          admin,
+          command("expense.save", undefined, {
+            name: "طبيب",
+            cost: 300,
+            frequency: "once",
+            incurredAt: "2026-10-15",
+            allocationScope: "selected",
+            horseIds: ["private"],
+            chargedTo: "owner",
+            expenseKind: "operating",
+          }),
+          now,
+        ),
+      /الملك الخاص/,
+    );
+  }
+});
+
 test("known costs exceeding income still flag a minimum deficit when more feed costs are missing", () => {
   const s = seed();
   s.horses[0].boardingFee = 100;

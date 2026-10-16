@@ -680,6 +680,20 @@ export function applyCommand(
       ensure(["stable", "owner"].includes(chargedTo), "حدد من يتحمل المصروف");
       ensure(
         chargedTo !== "owner" ||
+          ids.every((i) => {
+            const horse = find(s, "horses", i);
+            return (
+              horse.status !== "private" &&
+              !(
+                horse.status === "archived" &&
+                horse.previousStatus === "private"
+              )
+            );
+          }),
+        "مصروفات الخيل الملك الخاص على الإسطبل ولا تُضاف على المالك",
+      );
+      ensure(
+        chargedTo !== "owner" ||
           (d.frequency === "once" && ids.length && expenseKind === "operating"),
         "المصروف المسترد من المالك يجب أن يكون تشغيلًا لمرة واحدة على خيل محددة",
       );

@@ -182,6 +182,21 @@ async function main() {
             path: path.join(output, "private-horse.png"),
           });
           await detail
+            .getByRole("button", { name: "إضافة مصروف", exact: true })
+            .click();
+          const privateExpense = page.getByRole("dialog", {
+            name: "مصروف خاص · خيل ملك خاص تجريبي",
+            exact: true,
+          });
+          await privateExpense.waitFor();
+          assert.deepEqual(
+            await privateExpense
+              .getByLabel(/من يتحمله/)
+              .locator("option")
+              .allTextContents(),
+            ["الإسطبل"],
+          );
+          await privateExpense
             .getByRole("button", { name: "إغلاق", exact: true })
             .click();
         },

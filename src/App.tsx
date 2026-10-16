@@ -904,10 +904,13 @@ export default function App() {
                         {
                           name: "chargedTo",
                           label: "من يتحمله؟",
-                          options: [
-                            ["stable", "الإسطبل"],
-                            ["owner", "يُسترد من المالك"],
-                          ],
+                          options:
+                            h.status === "private"
+                              ? [["stable", "الإسطبل"]]
+                              : [
+                                  ["stable", "الإسطبل"],
+                                  ["owner", "يُسترد من المالك"],
+                                ],
                         },
                       ],
                       values: {
@@ -917,7 +920,10 @@ export default function App() {
                         horseIds: [h.id],
                         chargedTo: "stable",
                       },
-                      note: "يسجل تكلفة خاصة بهذا الخيل. الدفع الفعلي يسجل من المصروفات. لا يضاف إلى حساب المالك إلا عند اختيار استرداده منه.",
+                      note:
+                        h.status === "private"
+                          ? "مصروف هذا الخيل على الإسطبل. سجل سداد المصروف عند دفعه فعليًا."
+                          : "يسجل تكلفة خاصة بهذا الخيل. سداد المصروف يسجل من المصروفات. لا يضاف إلى حساب المالك إلا عند اختيار استرداده منه.",
                       submit: (d) =>
                         execute({ action: "expense.save", data: d }),
                     });
@@ -2918,7 +2924,11 @@ function FormView({
         <fieldset>
           <legend>ربط المصروف بالخيل</legend>
           {state.horses
-            .filter((h) => h.status !== "archived")
+            .filter(
+              (h) =>
+                h.status !== "archived" &&
+                (v.chargedTo !== "owner" || h.status !== "private"),
+            )
             .map((h) => (
               <label className="check-field" key={h.id}>
                 <input
