@@ -67,9 +67,15 @@ done
 test "$RESUMED" = true
 READY=false
 for i in $(seq 1 20); do
-  adb shell uiautomator dump /sdcard/alatheel-window.xml
-  adb pull /sdcard/alatheel-window.xml android-qa/window.xml
-  if grep -Eq 'Google|قوقل' android-qa/window.xml; then READY=true; break; fi
+  adb logcat -d -b crash > android-qa/crash.txt
+  if grep -Fq 'Process: com.alatheel.stable' android-qa/crash.txt; then cat android-qa/crash.txt; exit 1; fi
+  # UiAutomation can return a null root or crash while the cold WebView starts.
+  # Only accept a fresh, complete hierarchy; keep waiting within this fixed bound.
+  adb shell rm -f /sdcard/alatheel-window.xml
+  if timeout 15 adb shell uiautomator dump /sdcard/alatheel-window.xml &&
+     timeout 10 adb pull /sdcard/alatheel-window.xml android-qa/window.xml; then
+    if grep -Eq 'Google|قوقل' android-qa/window.xml; then READY=true; break; fi
+  fi
   sleep 2
 done
 adb logcat -d > android-qa/app-log.txt
@@ -80,3 +86,4 @@ grep -Fq 'com.alatheel.stable' android-qa/window.xml
 if grep -Fq 'تعذر التحقق' android-qa/window.xml; then cat android-qa/dns-check.txt android-qa/ip-check.txt android-qa/host-dns.txt; grep -E -A 8 'AlatheelUpdater|UnknownHost|DnsResolver|SSL|Network is unreachable' android-qa/app-log.txt || true; exit 1; fi
 test "$READY" = true
 printf 'Signed APK installed and reached the Google sign-in screen without an Android crash. Authentication was not attempted.\n' > android-qa/result.txt
+
