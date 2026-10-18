@@ -1,4 +1,4 @@
-export const RELEASE_VERSION = "1.8.2";
+export const RELEASE_VERSION = "1.8.3";
 export const RELEASE_NOTES = [
   { title: "حسابك · أعلى اليسار", items: [
     "تم تحسين حفظ تسجيل الدخول لمدة 7 أيام عند إغلاق التطبيق وإعادة فتحه.",

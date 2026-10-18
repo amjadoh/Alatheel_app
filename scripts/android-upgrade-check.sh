@@ -4,8 +4,11 @@ export ANDROID_QA_API="${ANDROID_QA_API:-35}"
 python3 - <<'PY'
 from pathlib import Path
 import os
+version=__import__('json').loads(Path('package.json').read_text())['version']
 p=Path("scripts/android-smoke.sh").read_text()
 p=p.replace("system-images;android-35;google_apis;x86_64", "system-images;android-"+os.environ["ANDROID_QA_API"]+";google_apis;x86_64")
+if os.environ["ANDROID_QA_API"] == "29":
+    p=p.replace("grep -Eq 'Google|قوقل'", "grep -Fq 'تحديث مكوّن أندرويد'")
 needle="adb install -r apk/app-release.apk"
 assert p.count(needle)==1
 p=p.replace(needle, r'''
@@ -28,7 +31,7 @@ for pair in "previous/Alatheel-1.8.1.apk 1.8.1" "apk/app-release.apk 1.8.2"; do
   test "$FIRST_TIME" = "$(identity | grep 'firstInstallTime=')"
 done
 printf "PASS: 1.7.0 -> 1.8.1 -> 1.8.2; UID and firstInstallTime retained without uninstall or data clear.\n" > android-qa/upgrade-result.txt
-''')
+'''.replace('1.8.2', version))
 needle='printf \'Signed APK installed'
 # Add a full process stop/reopen before the final successful smoke result.
 pos=p.index(needle)
@@ -41,3 +44,4 @@ if grep -Fq "Process: com.alatheel.stable" android-qa/restart-crash.txt; then ex
 Path("android-upgrade-generated.sh").write_text(p)
 PY
 bash android-upgrade-generated.sh
+

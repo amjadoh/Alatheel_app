@@ -94,6 +94,10 @@ jobs:
           retention-days: 30
   emulator:
     needs: android
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -104,18 +108,29 @@ jobs:
           java-version: "21"
       - uses: android-actions/setup-android@v3
         with:
-          packages: "platform-tools emulator system-images;android-35;google_apis;x86_64"
+          packages: "platform-tools emulator system-images;android-${{ matrix.api }};google_apis;x86_64"
           log-accepted-android-sdk-licenses: false
       - uses: actions/download-artifact@v4
         with:
           name: Alatheel-Android-Google
           path: apk
-      - name: Verify signed app starts on Android
+      - name: Download earlier releases for the signed upgrade check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p previous
+          gh release download v1.7.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.7.0.apk -D previous
+          gh release download v1.8.1 -R "$GITHUB_REPOSITORY" -p Alatheel-1.8.1.apk -D previous
+          printf '%s\n' '7a4704da10119300389b39fc0526810c87f9831b1eb2dd828c2a8d01a9bc33e8  previous/Alatheel-1.7.0.apk' 'cd0c43f410502c52fe3f0b69a06c0e0f36e12c5953fd9ef36cd9a29bae2e5753  previous/Alatheel-1.8.1.apk' | sha256sum --check
+      - name: Verify upgrade, cold startup and outdated WebView recovery
         shell: bash
-        run: bash scripts/android-smoke.sh
+        env:
+          ANDROID_QA_API: ${{ matrix.api }}
+        run: bash scripts/android-upgrade-check.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Alatheel-Android-Smoke-QA
+          name: Alatheel-Android-Smoke-QA-${{ matrix.api }}
           path: android-qa/
           retention-days: 30
