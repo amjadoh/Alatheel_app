@@ -18,7 +18,17 @@ test -x "$ANDROID_HOME/emulator/emulator"
 "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx alatheel-qa
 "$ANDROID_HOME/emulator/emulator" -avd alatheel-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -dns-server 8.8.8.8 > android-qa/emulator.log 2>&1 &
 EMULATOR_PID=$!
-trap 'kill "$EMULATOR_PID" 2>/dev/null || true' EXIT
+cleanup() {
+  set +e
+  if test "$(adb get-state 2>/dev/null | tr -d '\r')" = device; then
+    timeout 20 adb logcat -d > android-qa/app-log.txt
+    timeout 20 adb logcat -d -b crash > android-qa/crash.txt
+    timeout 20 adb shell dumpsys activity activities > android-qa/activities.txt
+    timeout 20 adb exec-out screencap -p > android-qa/launch.png
+  fi
+  kill "$EMULATOR_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
 CONNECTED=false
 for i in $(seq 1 120); do
   if ! kill -0 "$EMULATOR_PID" 2>/dev/null; then cat android-qa/emulator.log; exit 1; fi
@@ -44,17 +54,29 @@ adb shell settings put global animator_duration_scale 0
 adb install -r apk/app-release.apk
 adb logcat -c
 adb shell am start -W -n com.alatheel.stable/.MainActivity > android-qa/start.txt
-grep -Fq 'Status: ok' android-qa/start.txt
-sleep 12
-adb shell dumpsys activity activities > android-qa/activities.txt
-grep -E 'mResumedActivity|topResumedActivity' android-qa/activities.txt | grep -Fq com.alatheel.stable
-adb shell uiautomator dump /sdcard/alatheel-window.xml
-adb pull /sdcard/alatheel-window.xml android-qa/window.xml
+# A cold emulator may exceed the am -W waiter while the activity still starts.
+# Verify the actual foreground and Google sign-in screen, without hiding crashes.
+RESUMED=false
+for i in $(seq 1 30); do
+  adb logcat -d -b crash > android-qa/crash.txt
+  if grep -Fq 'Process: com.alatheel.stable' android-qa/crash.txt; then cat android-qa/crash.txt; exit 1; fi
+  adb shell dumpsys activity activities > android-qa/activities.txt
+  if grep -E 'mResumedActivity|topResumedActivity' android-qa/activities.txt | grep -Fq com.alatheel.stable; then RESUMED=true; break; fi
+  sleep 2
+done
+test "$RESUMED" = true
+READY=false
+for i in $(seq 1 20); do
+  adb shell uiautomator dump /sdcard/alatheel-window.xml
+  adb pull /sdcard/alatheel-window.xml android-qa/window.xml
+  if grep -Eq 'Google|قوقل' android-qa/window.xml; then READY=true; break; fi
+  sleep 2
+done
 adb logcat -d > android-qa/app-log.txt
 adb exec-out screencap -p > android-qa/launch.png
 adb logcat -d -b crash > android-qa/crash.txt
 if grep -Fq 'Process: com.alatheel.stable' android-qa/crash.txt; then cat android-qa/crash.txt; exit 1; fi
 grep -Fq 'com.alatheel.stable' android-qa/window.xml
 if grep -Fq 'تعذر التحقق' android-qa/window.xml; then cat android-qa/dns-check.txt android-qa/ip-check.txt android-qa/host-dns.txt; grep -E -A 8 'AlatheelUpdater|UnknownHost|DnsResolver|SSL|Network is unreachable' android-qa/app-log.txt || true; exit 1; fi
-grep -Eq 'Google|قوقل' android-qa/window.xml
+test "$READY" = true
 printf 'Signed APK installed and reached the Google sign-in screen without an Android crash. Authentication was not attempted.\n' > android-qa/result.txt
