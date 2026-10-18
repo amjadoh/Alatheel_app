@@ -75,11 +75,11 @@ jobs:
       - name: Verify the built APK identity and signing certificate
         run: |
           set -euo pipefail
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-signature.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk | tee android/app/build/outputs/apk/release/apk-signature.txt
           grep -Fiq '2f508f35d389af0260d7d216fb750e2e49ecaeb4e4ffe5a9f928b1f7a7d6f83f' android/app/build/outputs/apk/release/apk-signature.txt
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-identity.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/release/app-release.apk | tee android/app/build/outputs/apk/release/apk-identity.txt
           EXPECTED_VERSION="$(node -p "require('./package.json').version")"
-          EXPECTED_CODE="$(awk '/^[[:space:]]*versionCode / {print $2; exit}' android/app/build.gradle)"
+          EXPECTED_CODE="$(node -e 'const f=require("fs").readFileSync("android/app/build.gradle","utf8"); const m=f.match(/\bversionCode\s+(\d+)/); if(!m)process.exit(1); process.stdout.write(m[1])')"
           [[ "$EXPECTED_CODE" =~ ^[0-9]+$ ]]
           [[ "$EXPECTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           grep -Fq "package: name='com.alatheel.stable' versionCode='$EXPECTED_CODE' versionName='$EXPECTED_VERSION'" android/app/build/outputs/apk/release/apk-identity.txt
@@ -134,3 +134,4 @@ jobs:
           name: Alatheel-Android-Smoke-QA-${{ matrix.api }}
           path: android-qa/
           retention-days: 30
+
