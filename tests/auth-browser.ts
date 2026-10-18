@@ -62,3 +62,22 @@ qa.signOut = async () => {
   await signOut(auth);
   qa.uid = null;
 };
+// SDK storage requests can resolve before the IndexedDB transaction commits.
+// Observe completion before the test shuts down Chromium (not an app change).
+qa.storageCommitted = async () => {
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("firebaseLocalStorageDb");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    if (!db.objectStoreNames.contains("firebaseLocalStorage")) { db.close(); return; }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("firebaseLocalStorage", "readonly");
+      tx.objectStore("firebaseLocalStorage").getAll();
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch { /* Tests for unavailable IndexedDB use localStorage instead. */ }
+};

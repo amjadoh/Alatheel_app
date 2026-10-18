@@ -10,20 +10,21 @@ needle="adb install -r apk/app-release.apk"
 assert p.count(needle)==1
 p=p.replace(needle, r'''
 PACKAGE=com.alatheel.stable
-identity() { adb shell dumpsys package "$PACKAGE" | grep -E "userId=|firstInstallTime=|versionCode=|versionName=" | tr -d "\r"; }
+identity() { adb shell cmd package list packages -U "$PACKAGE"; adb shell dumpsys package "$PACKAGE" | grep -E "firstInstallTime=|versionCode=|versionName=" | tr -d "\r"; }
 install_checked() {
   local file="$1" version="$2"
   adb install -r "$file" | tee -a android-qa/upgrade-install.txt
   identity | tee -a android-qa/upgrade-identity.txt
-  adb shell dumpsys package "$PACKAGE" | grep -Fq "versionName=$version"
+  local info="$(adb shell dumpsys package "$PACKAGE")"
+  grep -Fq "versionName=$version" <<< "$info"
 }
 install_checked previous/Alatheel-1.7.0.apk 1.7.0
-FIRST_ID="$(identity | grep 'userId=')"
+FIRST_ID="$(identity | grep 'uid:')"
 FIRST_TIME="$(identity | grep 'firstInstallTime=')"
 for pair in "previous/Alatheel-1.8.1.apk 1.8.1" "apk/app-release.apk 1.8.2"; do
   read -r file version <<< "$pair"
   install_checked "$file" "$version"
-  test "$FIRST_ID" = "$(identity | grep 'userId=')"
+  test "$FIRST_ID" = "$(identity | grep 'uid:')"
   test "$FIRST_TIME" = "$(identity | grep 'firstInstallTime=')"
 done
 printf "PASS: 1.7.0 -> 1.8.1 -> 1.8.2; UID and firstInstallTime retained without uninstall or data clear.\n" > android-qa/upgrade-result.txt

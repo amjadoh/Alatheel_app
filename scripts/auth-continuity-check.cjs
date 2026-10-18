@@ -142,6 +142,10 @@ async function open(page, legacy = false) {
   );
 }
 async function close() {
+  const pages = context.pages();
+  for (const page of pages) {
+    await page.evaluate(() => window.__authQA?.storageCommitted?.());
+  }
   await context.close();
   context = null;
 }
