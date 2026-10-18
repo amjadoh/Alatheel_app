@@ -57,7 +57,7 @@ import {
   expenseFeedMeal,
 } from "./metrics";
 import { exportExcel, exportPdf } from "./export";
-import { UpdateButton } from "./updates";
+import { UpdateButton,useAppUpdate } from "./updates";
 import {
   FinancialDashboard,
   HorseFinancialPanel,
@@ -1020,8 +1020,10 @@ export default function App() {
     setDetail(null);
     setAccountHorseId(h.id);
   };
+  const appUpdates=useAppUpdate();
   const notifications = useStaffNotifications(a, target => {
     setDetail(null);setAccountMenuOpen(false);
+    if(target.page === "update"){appUpdates.check();go("more");return;}
     if(target.page === "income" && target.horseId){const horse=s.horses.find(h=>h.id===target.horseId);if(horse){go("income");collect(horse);}}
     else {go("inventory");if(target.mealTypeId)setSearch(s.mealTypes.find(m=>m.id===target.mealTypeId)?.name || "");}
   });
@@ -1103,7 +1105,7 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="التنبيهات"
-              onClick={() => go(isStaff ? "notifications" : "activity")}
+              onClick={() => go("notifications")}
             >
               <Bell size={21} />
               {notifications.unread > 0 && isStaff && <i />}
@@ -1150,7 +1152,7 @@ export default function App() {
             {isStaff && <button onClick={()=>go("owners")}><Users size={18}/><span>سجل الملاك</span><ChevronLeft size={16}/></button>}
             {isStaff && <button onClick={()=>go("requests")}><ClipboardList size={18}/><span>طلبات تسجيل الخيل</span><ChevronLeft size={16}/></button>}
             {isAdmin && <button onClick={()=>go("members")}><Users size={18}/><span>الأعضاء والصلاحيات</span><ChevronLeft size={16}/></button>}
-            {isStaff && <button onClick={()=>go("notifications")}><Bell size={18}/><span>الإشعارات</span><ChevronLeft size={16}/></button>}
+            <button onClick={()=>go("notifications")}><Bell size={18}/><span>الإشعارات</span><ChevronLeft size={16}/></button>
             <button onClick={()=>go("activity")}><History size={18}/><span>سجل العمليات</span><ChevronLeft size={16}/></button>
             <button onClick={()=>go("more")}><SlidersHorizontal size={18}/><span>بيانات حسابي والإعدادات</span><ChevronLeft size={16}/></button>
             <p className="session-note"><ShieldCheck size={16}/>جلسة الدخول محفوظة {displayNumber(7)} أيام</p>
@@ -1664,7 +1666,7 @@ export default function App() {
                 )}
               </>
             )}
-            {tab === "notifications" && isStaff && <NotificationsPanel notifications={notifications}/>}
+            {tab === "notifications" && <NotificationsPanel notifications={notifications}/>}
             {tab === "inventory" && isStaff && (
               <>
                 {heading(

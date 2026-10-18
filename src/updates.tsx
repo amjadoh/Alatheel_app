@@ -37,6 +37,7 @@ const UpdateContext = createContext({
   busy: false,
   message: "",
 });
+export const useAppUpdate = () => useContext(UpdateContext);
 
 export function UpdateButton() {
   const { check, busy, message } = useContext(UpdateContext);

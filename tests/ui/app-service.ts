@@ -114,6 +114,9 @@ if (
   );
 }
 let emit: (s: State, a: Actor | null, error?: string) => void = () => {};
+if(new URLSearchParams(location.search).get("scenario")==="owner-alerts"){
+  a.uid="owner";a.ownerRecordId="owner";a.role="owner";a.displayName="مالك تجريبي";
+}
 let lostReceiptAcknowledgement = false;
 export const inspectQA = () => structuredClone(s);
 (window as any).__alatheelQA = inspectQA;

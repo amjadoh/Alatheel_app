@@ -17,7 +17,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       BUILD_RUN: ${{ inputs.build_run }}
-      RELEASE_TAG: v1.8.0
+      RELEASE_TAG: v1.8.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,9 +37,9 @@ jobs:
           test -s artifact/app-release.apk
           grep -Fq '2F:50:8F:35:D3:89:AF:02:60:D7:D2:16:FB:75:0E:2E:49:EC:AE:B4:E4:FF:E5:A9:F9:28:B1:F7:A7:D6:F8:3F' artifact/signing-certificate.txt
           grep -Fiq '2f508f35d389af0260d7d216fb750e2e49ecaeb4e4ffe5a9f928b1f7a7d6f83f' artifact/apk-signature.txt
-          grep -Fq "package: name='com.alatheel.stable' versionCode='9' versionName='1.8.0'" artifact/apk-identity.txt
-          mv artifact/app-release.apk artifact/Alatheel-1.8.0.apk
-          (cd artifact && sha256sum Alatheel-1.8.0.apk > SHA256SUMS.txt)
+          grep -Fq "package: name='com.alatheel.stable' versionCode='10' versionName='1.8.1'" artifact/apk-identity.txt
+          mv artifact/app-release.apk artifact/Alatheel-1.8.1.apk
+          (cd artifact && sha256sum Alatheel-1.8.1.apk > SHA256SUMS.txt)
       - name: Publish GitHub release
         shell: bash
         run: |
@@ -47,9 +47,9 @@ jobs:
           TAG_SHA="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG" --jq '.[] | select(.ref == ("refs/tags/" + env.RELEASE_TAG)) | .object.sha')"
           if test -n "$TAG_SHA"; then test "$TAG_SHA" = "$SOURCE_SHA"; fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" artifact/Alatheel-1.8.0.apk artifact/SHA256SUMS.txt
+            gh release upload "$RELEASE_TAG" artifact/Alatheel-1.8.1.apk artifact/SHA256SUMS.txt
           else
-            gh release create "$RELEASE_TAG" artifact/Alatheel-1.8.0.apk artifact/SHA256SUMS.txt \
-              --target "$SOURCE_SHA" --title 'الأثيل — Android 1.8.0 · التغذية التلقائية والتنبيهات وتحسين العرض' \
-              --notes-file docs/release-v1.8.0.md
+            gh release create "$RELEASE_TAG" artifact/Alatheel-1.8.1.apk artifact/SHA256SUMS.txt \
+              --target "$SOURCE_SHA" --title 'الأثيل — Android 1.8.1 · التغذية التلقائية والتنبيهات وتحسين العرض' \
+              --notes-file docs/release-v1.8.1.md
           fi

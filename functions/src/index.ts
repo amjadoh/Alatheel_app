@@ -38,6 +38,8 @@ export const synchronizeFeeding = notificationExports.synchronizeFeeding;
 export const remindCollections = notificationExports.remindCollections;
 export const inventoryAlert = notificationExports.inventoryAlert;
 export const deliverStaffAlert = notificationExports.deliverStaffAlert;
+export const discoverAppUpdates = notificationExports.discoverAppUpdates;
+export const retryPendingAlerts = notificationExports.retryPendingAlerts;
 function optionsForNotifications() { return { region: process.env.FUNCTIONS_REGION || "us-central1", maxInstances: 5 }; }
 const invitationsEnabled = process.env.INVITATIONS_ENABLED === "true";
 const options = {

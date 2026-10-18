@@ -62,7 +62,7 @@ async function main() {
     await page.clock.install({ time: new Date("2026-10-16T12:00:00Z") });
     await page.goto(base + "/tests/ui/app.html");
     const notes = page.getByRole("dialog", {
-      name: "ما الجديد في الأثيل 1.8.0؟",
+      name: "ما الجديد في الأثيل 1.8.1؟",
       exact: true,
     });
     await notes.waitFor();
@@ -373,10 +373,10 @@ async function main() {
         s=await snapshot(page);assert.equal(s.mealTypes[0].currentStock,8.5);assert.deepEqual(s.expensePayments,before.expensePayments);assert.deepEqual(s.expenses,before.expenses);assert.deepEqual(s.income,before.income);
         await page.screenshot({path:path.join(output,"stock-reconciled.png")});
       });
-      await check("Notifications expose exactly three staff options and the approved collection time",async()=>{
+      await check("Notifications expose four staff options including app updates and the approved collection time",async()=>{
         await page.getByRole("button",{name:"التنبيهات",exact:true}).click();
         const panel=page.locator(".notification-page");await panel.waitFor();
-        assert.equal(await panel.getByRole("checkbox").count(),3);
+        assert.equal(await panel.getByRole("checkbox").count(),4);
         assert.match(await panel.textContent(),/9.*مساءً بتوقيت السعودية/);
         assert.doesNotMatch(await panel.textContent(),/تصل الإشعارات للجوال|الانقطاع المؤقت/);
         await panel.getByLabel("انخفاض المخزون",{exact:true}).uncheck();
@@ -527,6 +527,19 @@ async function main() {
       await context.close();
     },
   );
+  await check("Owner sees app update preference without staff collection or inventory preferences",async()=>{
+    const context=await browser.newContext({viewport:{width:320,height:844},isMobile:true,hasTouch:true});
+    await context.route("**/*",route=>new URL(route.request().url()).origin===base?route.continue():route.abort());
+    const page=await context.newPage();page.on("pageerror",e=>report.errors.push(e.message));
+    await page.goto(base+"/tests/ui/app.html?scenario=owner-alerts");
+    await page.getByRole("dialog").getByRole("button",{name:"إغلاق",exact:true}).click();
+    await page.getByRole("button",{name:"التنبيهات",exact:true}).click();
+    const panel=page.locator(".notification-page");await panel.waitFor();
+    assert.equal(await panel.getByRole("checkbox").count(),1);
+    await panel.getByLabel("إصدار جديد للتطبيق",{exact:true}).waitFor();
+    assert.doesNotMatch(await panel.textContent(),/استحقاق التحصيل|انخفاض المخزون|نفاد المخزون/);
+    await page.screenshot({path:path.join(output,"owner-update-alerts.png")});await context.close();
+  });
   assert.deepEqual(report.errors, []);
 }
 main()

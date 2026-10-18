@@ -74,7 +74,7 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-signature.txt
           grep -Fiq '2f508f35d389af0260d7d216fb750e2e49ecaeb4e4ffe5a9f928b1f7a7d6f83f' android/app/build/outputs/apk/release/apk-signature.txt
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-identity.txt
-          grep -Fq "package: name='com.alatheel.stable' versionCode='9' versionName='1.8.0'" android/app/build/outputs/apk/release/apk-identity.txt
+          grep -Fq "package: name='com.alatheel.stable' versionCode='10' versionName='1.8.1'" android/app/build/outputs/apk/release/apk-identity.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Alatheel-Android-Google

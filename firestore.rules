@@ -129,13 +129,14 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['displayName','photoURL','phoneNumber']);
     }
     match /users/{userId}/staffAlerts/{alertId} {
-      allow read: if isEmployee() && request.auth.uid == userId;
-      allow update: if isEmployee() && request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read is bool;
+      allow read: if isSignedIn() && request.auth.uid == userId && (isEmployee() || resource.data.kind == 'app_update');
+      allow update: if isSignedIn() && request.auth.uid == userId && (isEmployee() || existing().kind == 'app_update') && incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read is bool;
       allow create, delete: if false;
     }
     match /pushDevices/{deviceId} { allow read, write: if false; }
     match /stockAlertState/{itemId} { allow read, write: if false; }
     match /staffAlertEvents/{eventId} { allow read, write: if false; }
+    match /appUpdateState/{versionId} { allow read, write: if false; }
 
     // 1. Horses Collection
     match /owners/{ownerId} {
