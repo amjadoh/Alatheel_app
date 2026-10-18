@@ -1713,9 +1713,9 @@ export default function App() {
                     <div className="spread">
                       <h2>{m.name}</h2>
                       <span
-                        className={`pill ${m.currentStock <= m.minThreshold ? "red" : ""}`}
+                        className={`pill ${m.currentStock <= m.minThreshold || stockNeeds.items.find(i => i.id === m.id)!.shortage > 0 ? "red" : ""}`}
                       >
-                        {m.currentStock <= 0 ? "نافد" : m.currentStock <= m.minThreshold ? "منخفض" : "متوفر"}
+                        {m.currentStock <= 0 ? "نافد" : stockNeeds.items.find(i => i.id === m.id)!.shortage > 0 ? "يحتاج شراء" : stockNeeds.items.find(i => i.id === m.id)!.unscheduled.length ? "مواعيد غير مكتملة" : m.currentStock <= m.minThreshold ? "منخفض" : "يكفي الفترة"}
                       </span>
                     </div>
                     <InventoryItemNeeds item={stockNeeds.items.find(i => i.id === m.id)!} end={stockNeeds.end} />
