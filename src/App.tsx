@@ -1,4 +1,8 @@
 import { TERMS } from "./terms";
+import { NotificationsPanel,useStaffNotifications } from "./notifications";
+import { displayAmount, displayNumber, displayQuantity, displayPrice, displayDate, displayMonth, isolateNumber, displayDateTime, displayIdentifier } from "./format";
+import { FeedingEditor, FeedingPlanSummary, feedingFormError } from "./feeding-editor";
+import { feedingAtDate, feedingOnDate, scheduledFeedingDates } from "../functions/src/feeding";
 import { useEffect, useRef, useState, ReactNode } from "react";
 import {
   LayoutDashboard,
@@ -95,6 +99,7 @@ type Form = {
   horsePhoto?: boolean;
   inventoryItem?: string;
   inventoryDefinition?: boolean;
+  inventoryReconciliation?: string;
   note?: string;
 };
 const roles: Record<string, string> = {
@@ -120,8 +125,7 @@ const frequencies: [string, string][] = [
   ["weekly", "أسبوعي"],
   ["monthly", "شهري"],
 ];
-const money = (n: unknown) =>
-  Number(n || 0).toLocaleString("ar-SA", { maximumFractionDigits: 2 });
+const money = displayAmount;
 const today = () => businessDay(new Date().toISOString());
 const HorseIcon = ({ size = 22 }: { size?: number }) => (
   <svg
@@ -421,7 +425,7 @@ export default function App() {
           },
       feeding: true,
       horsePhoto: true,
-      note: "رسوم الإيواء شهرية؛ خيار الأيام يشمل يومي الدخول والخروج. التغذية اليومية تحسب لأيام الإقامة، والتغذية بعدد مرات شهري توزع بنسبة أيام الإقامة. تعديل الشهر الجاري لا يغير الأشهر المغلقة. الحفظ لا يرسل دعوة.",
+      note: "رسوم الإيواء شهرية؛ خيار الأيام يشمل يومي الدخول والخروج. حدد كمية التغذية ومواعيدها؛ التكلفة تراعي أيام الإقامة والمواعيد الفعلية. يبدأ خصم المخزون بعد تأكيد رصيده من المخزون. الأشهر المغلقة تحتفظ بحساباتها. الحفظ لا يرسل دعوة.",
       submit: (d) => execute({ action: "horse.save", id: h?.id, data: d }),
     });
   const mealForm = (m?: Row) =>
@@ -483,7 +487,7 @@ export default function App() {
           data: { ...d, currentStock: m?.currentStock || 0 },
         }),
       note: m
-        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. مثال: كيس 40 كجم بسعر 90 ريالًا = 2.25 ريال للكجم. الرصيد وحركاته بوحدة الشراء؛ لتغيير الرصيد استخدم «تصحيح زيادة رصيد» أو «صرف من المخزون»."
+        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. الرصيد وحركاته بوحدة الشراء. لمراجعة الموجود فعليًا استخدم «مطابقة الكمية الفعلية»؛ ولشراء جديد استخدم «شراء وإضافة». الخصم التلقائي لا يسجل مصروفًا ماليًا جديدًا."
         : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «شراء وإضافة». لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
     });
   const purchase = (m: Row) =>
@@ -560,9 +564,38 @@ export default function App() {
         },
       ],
       values: { amount: 1, type },
-      note: `الرصيد الحالي: ${money(m.currentStock)} ${m.unit}. هذه حركة كمية فقط دون مبلغ مدفوع. للمشتريات استخدم شراء وإضافة.`,
+      note: `الرصيد الحالي: ${displayQuantity(m.currentStock)} ${m.unit}. هذه حركة كمية إضافية فقط دون مبلغ مدفوع؛ لا تستخدمها لوجبة خُصمت تلقائيًا. للمشتريات استخدم شراء وإضافة.`,
       submit: (d) => execute({ action: "stock.move", id: m.id, data: d }),
     });
+  const reconcileStock = (m: Row) =>
+    setForm({
+      title: m.autoFeedingFrom ? `مطابقة الكمية الفعلية · ${m.name}` : `تأكيد الرصيد وتفعيل الخصم · ${m.name}`,
+      inventoryReconciliation: m.id,
+      fields: [
+        { name: "actualQuantity", label: `الموجود فعليًا (${m.unit})`, type: "number", min: 0, required: true },
+        { name: "reason", label: "سبب المطابقة", type: "textarea", required: true },
+      ],
+      values: { actualQuantity: m.currentStock || 0, reason: "", activate: !m.autoFeedingFrom },
+      note: m.autoFeedingFrom
+        ? "أدخل الموجود أمامك الآن. يسجل التطبيق فرق الجرد فقط ويكمل الخصم من الرصيد المصحح، دون مصروف أو سداد جديد. إذا كانت الزيادة من شراء فاستخدم «شراء وإضافة»."
+        : "أكد الموجود أمامك الآن لبدء الخصم التلقائي من الغد حسب خطط التغذية. لا يخصم التطبيق الأيام السابقة أو تغذية اليوم مرة أخرى. هذه مطابقة كمية فقط؛ لا تسجل مصروف شراء أو دفعة مالية.",
+      submit: (d) => execute({ action: "stock.reconcile", id: m.id, data: d }),
+    });
+  const skipFeeding = (h: Row, meal: Row) => {
+    const dates = Array.from({ length: new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate() }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`)
+      .filter((day) => feedingAtDate(h, day).some((plan: any) => plan.mealTypeId === meal.id && feedingOnDate(plan, day)) && !h.feedingSkips?.some((skip: any) => skip.mealTypeId === meal.id && skip.date === day));
+    setDetail(null);
+    setForm({
+      title: `تخطي وجبة · ${h.name} · ${meal.name}`,
+      fields: [
+        { name: "date", label: "موعد الوجبة", required: true, options: [["", "اختر الموعد"], ...dates.map((day) => [day, displayDate(day)] as [string, string])] },
+        { name: "reason", label: "سبب التخطي", type: "textarea", required: true },
+      ],
+      values: { mealTypeId: meal.id, date: dates.includes(today()) ? today() : "", reason: "" },
+      note: "يسجل استثناء لهذه الوجبة فقط دون حركة مالية. يراعي تصحيح المخزون آخر جرد فعلي معتمد.",
+      submit: (d) => execute({ action: "feeding.skip", id: h.id, data: d }),
+    });
+  };
   const expenseForm = (e?: Row) =>
     setForm({
       title: e ? "تعديل مصروف" : "مصروف جديد",
@@ -786,11 +819,11 @@ export default function App() {
             <dt>الحالة</dt>
             <dd>{status[h.status] || h.status}</dd>
             <dt>التسجيل</dt>
-            <dd>{h.registrationNum || "—"}</dd>
+            <dd>{displayIdentifier(h.registrationNum)}</dd>
             <dt>الدخول</dt>
-            <dd>{h.entryDate}</dd>
+            <dd>{displayDate(h.entryDate)}</dd>
             <dt>الاستحقاق</dt>
-            <dd>{h.dueDate || "—"}</dd>
+            <dd>{displayDate(h.dueDate)}</dd>
             <dt>رسوم الإيواء الحالية</dt>
             <dd>{money(h.boardingFee)} ر.س</dd>
             <dt>احتساب شهر الدخول والخروج</dt>
@@ -803,16 +836,16 @@ export default function App() {
           {isStaff && (
             <div className="notice">
               <b>
-                تكلفة {month} التقديرية: {money(c.total)} ر.س
+                تكلفة {displayMonth(month)} التقديرية: {money(c.total)} ر.س
               </b>
               <p>
                 التغذية: {money(c.food)} ر.س · المصروفات: {money(c.other)} ر.س
               </p>
               {c.foodItems.map((f: any, i: number) => (
                 <p className="small" key={`food-${i}`}>
-                  {f.name}: {f.quantity} {f.unit}
+                  {f.name}: {displayQuantity(f.quantity)} {f.unit}
                   {f.frequency === "monthly" ? "/مرة" : "/يوم"} ×{" "}
-                  {money(f.rate)} ر.س × {f.count}{" "}
+                  {displayPrice(f.rate)} ر.س × {displayNumber(f.count)}{" "}
                   {f.frequency === "monthly" ? "مرات بالشهر" : "يومًا"} ={" "}
                   {money(f.amount)} ر.س
                 </p>
@@ -846,25 +879,7 @@ export default function App() {
             </Button>
           )}
           <h3>برنامج التغذية الحالي</h3>
-          {h.feeding?.length ? (
-            h.feeding.map((f: any, i: number) => (
-              <p key={i}>
-                {s.mealTypes.find((m) => m.id === f.mealTypeId)?.name ||
-                  "صنف تغذية"}{" "}
-                · {f.quantity}{" "}
-                {
-                  feedingMeasure(
-                    s.mealTypes.find((m) => m.id === f.mealTypeId) || {},
-                  ).unit
-                }{" "}
-                {f.frequency === "monthly"
-                  ? `في المرة × ${f.timesPerMonth} مرات بالشهر`
-                  : "يوميًا"}
-              </p>
-            ))
-          ) : (
-            <p className="muted">لم يحدد برنامج تغذية</p>
-          )}
+          {h.feeding?.length ? h.feeding.map((f:any,i:number)=>{const meal=s.mealTypes.find(m=>m.id===f.mealTypeId)||{id:f.mealTypeId,name:"صنف تغذية"};return <div key={i}><FeedingPlanSummary plan={f} meal={meal} month={month}/>{isStaff && <button className="button outline" onClick={()=>skipFeeding(h,meal)}>تخطي وجبة</button>}</div>;}) : <p className="muted">لم يحدد برنامج تغذية</p>}
           <div className="qr">
             <QRCodeSVG
               value={
@@ -1005,6 +1020,11 @@ export default function App() {
     setDetail(null);
     setAccountHorseId(h.id);
   };
+  const notifications = useStaffNotifications(a, target => {
+    setDetail(null);setAccountMenuOpen(false);
+    if(target.page === "income" && target.horseId){const horse=s.horses.find(h=>h.id===target.horseId);if(horse){go("income");collect(horse);}}
+    else {go("inventory");if(target.mealTypeId)setSearch(s.mealTypes.find(m=>m.id===target.mealTypeId)?.name || "");}
+  });
   const nav = isStaff
     ? [
         ["dashboard", "الرئيسية", LayoutDashboard],
@@ -1038,6 +1058,7 @@ export default function App() {
     owners: "الملاك.",
     more: "المزيد.",
     activity: "سجل العمليات.",
+    notifications: "الإشعارات.",
   };
   const pending = s.registrationRequests.filter((r) =>
     ["pending", "reviewing"].includes(r.status),
@@ -1082,10 +1103,10 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="التنبيهات"
-              onClick={() => go("activity")}
+              onClick={() => go(isStaff ? "notifications" : "activity")}
             >
               <Bell size={21} />
-              {pending.length > 0 && isStaff && <i />}
+              {notifications.unread > 0 && isStaff && <i />}
             </button>
             <button
               className="account-menu-toggle"
@@ -1124,41 +1145,16 @@ export default function App() {
             aria-label="إغلاق قائمة الحساب"
             onClick={() => setAccountMenuOpen(false)}
           />
-          <nav
-            className="account-popover"
-            aria-label="المزيد وخيارات الحساب"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setAccountMenuOpen(false);
-            }}
-          >
-            <strong>{a.displayName}</strong>
-            <small>{roles[a.role]}</small>
-            {isStaff && (
-              <button onClick={() => go("owners")}>
-                <Users size={18} />
-                سجل الملاك
-              </button>
-            )}
-            {isStaff && (
-              <button onClick={() => go("requests")}>
-                <ClipboardList size={18} />
-                طلبات تسجيل الخيل
-              </button>
-            )}
-            {isAdmin && (
-              <button onClick={() => go("members")}>
-                <Users size={18} />
-                الأعضاء والصلاحيات
-              </button>
-            )}
-            <button onClick={() => go("activity")}>
-              <History size={18} />
-              سجل العمليات
-            </button>
-            <button onClick={() => go("more")}>
-              <SlidersHorizontal size={18} />
-              المزيد وبيانات حسابي
-            </button>
+          <nav className="account-popover" aria-label="المزيد وخيارات الحساب" onKeyDown={e=>{if(e.key==="Escape")setAccountMenuOpen(false);}}>
+            <div className="account-menu-profile"><span className="account-profile-avatar">{a.photoURL ? <img src={a.photoURL} alt="" referrerPolicy="no-referrer"/> : a.displayName.charAt(0)}</span><div><strong><bdi dir="auto">{a.displayName}</bdi></strong><small>{roles[a.role]}</small></div><button className="account-close" aria-label="إغلاق القائمة" onClick={()=>setAccountMenuOpen(false)}><X size={18}/></button></div>
+            {isStaff && <button onClick={()=>go("owners")}><Users size={18}/><span>سجل الملاك</span><ChevronLeft size={16}/></button>}
+            {isStaff && <button onClick={()=>go("requests")}><ClipboardList size={18}/><span>طلبات تسجيل الخيل</span><ChevronLeft size={16}/></button>}
+            {isAdmin && <button onClick={()=>go("members")}><Users size={18}/><span>الأعضاء والصلاحيات</span><ChevronLeft size={16}/></button>}
+            {isStaff && <button onClick={()=>go("notifications")}><Bell size={18}/><span>الإشعارات</span><ChevronLeft size={16}/></button>}
+            <button onClick={()=>go("activity")}><History size={18}/><span>سجل العمليات</span><ChevronLeft size={16}/></button>
+            <button onClick={()=>go("more")}><SlidersHorizontal size={18}/><span>بيانات حسابي والإعدادات</span><ChevronLeft size={16}/></button>
+            <p className="session-note"><ShieldCheck size={16}/>جلسة الدخول محفوظة {displayNumber(7)} أيام</p>
+            <button onClick={()=>void logout()}><LogOut size={18}/><span>تسجيل الخروج</span><ChevronLeft size={16}/></button>
           </nav>
         </>
       )}
@@ -1280,9 +1276,7 @@ export default function App() {
                         <ClipboardList />
                         <span>{isStaff ? "طلبات تحتاج مراجعة" : "طلباتك"}</span>
                         <strong>
-                          {isStaff
-                            ? pending.length
-                            : s.registrationRequests.length}
+                          {displayNumber(isStaff ? pending.length : s.registrationRequests.length)}
                         </strong>
                         <small>
                           متابعة التسجيل <ArrowUpLeft size={16} />
@@ -1317,10 +1311,10 @@ export default function App() {
                 {isStaff && (
                   <div className="operations-strip">
                     <button onClick={() => go("horses")}>
-                      {active.length} خيل نشطة
+                      {displayNumber(active.length)} خيل نشطة
                     </button>
                     <button onClick={() => go("requests")}>
-                      {pending.length} طلبات
+                      {displayNumber(pending.length)} طلبات
                     </button>
                     <button onClick={() => go("owners")}>سجل الملاك</button>
                   </div>
@@ -1438,7 +1432,7 @@ export default function App() {
             {tab === "horses" && (
               <>
                 {heading(
-                  `${active.length} خيل نشطة`,
+                  `${displayNumber(active.length)} خيل نشطة`,
                   isStaff ? (
                     <button
                       className="round-add"
@@ -1586,10 +1580,10 @@ export default function App() {
                         </span>
                       </div>
                       <p className="muted">
-                        {r.ownerName} · العمر {r.age} · {status[r.requestType]}
+                        {r.ownerName} · العمر {displayNumber(r.age)} · {status[r.requestType]}
                       </p>
                       {r.registrationNum && (
-                        <p>رقم التسجيل: {r.registrationNum}</p>
+                        <p>رقم التسجيل: {displayIdentifier(r.registrationNum)}</p>
                       )}
                       {r.notes && <p>{r.notes}</p>}
                       {r.boardingFee !== undefined && (
@@ -1670,6 +1664,7 @@ export default function App() {
                 )}
               </>
             )}
+            {tab === "notifications" && isStaff && <NotificationsPanel notifications={notifications}/>}
             {tab === "inventory" && isStaff && (
               <>
                 {heading(
@@ -1690,35 +1685,32 @@ export default function App() {
                       <span
                         className={`pill ${m.currentStock <= m.minThreshold ? "red" : ""}`}
                       >
-                        {m.currentStock <= m.minThreshold
-                          ? "يحتاج توريد"
-                          : "متوفر"}
+                        {m.currentStock <= 0 ? "نافد" : m.currentStock <= m.minThreshold ? "منخفض" : "متوفر"}
                       </span>
                     </div>
                     <div className="big-number">
-                      {money(m.currentStock)} <small>{m.unit}</small>
+                      {displayQuantity(m.currentStock)} <small>{m.unit}</small>
                     </div>
                     <p className="muted">
-                      حد التنبيه {m.minThreshold} · سعر وحدة الشراء{" "}
-                      {money(m.pricePerUnit)} ر.س
+                      حد التنبيه {displayQuantity(m.minThreshold)} · سعر وحدة الشراء{" "}
+                      {displayPrice(m.pricePerUnit)} ر.س
                     </p>
                     <p className="muted small">
                       وحدة الشراء: {m.unit} · تحتوي{" "}
-                      {feedingMeasure(m).unitsPerPurchaseUnit}{" "}
+                      {displayQuantity(feedingMeasure(m).unitsPerPurchaseUnit)}{" "}
                       {feedingMeasure(m).unit} · سعر {feedingMeasure(m).unit}:{" "}
-                      {money(feedingUnitPrice(m))} ر.س
+                      {displayPrice(feedingUnitPrice(m))} ر.س
                     </p>
+                    <p className="muted small">{m.autoFeedingFrom ? <>الخصم التلقائي مفعّل من {displayDate(m.autoFeedingFrom)}</> : "الخصم التلقائي غير مفعّل؛ أكد الموجود فعليًا أولًا"}</p>
                     <div className="actions">
                       <Button kind="gold" onClick={() => purchase(m)}>
                         شراء وإضافة
                       </Button>
-                      <Button kind="outline" onClick={() => move(m, "remove")}>
-                        − صرف
-                      </Button>
+                      <Button kind="outline" onClick={() => reconcileStock(m)}>{m.autoFeedingFrom ? "مطابقة الكمية الفعلية" : "تأكيد الرصيد وتفعيل الخصم"}</Button>
                     </div>
                     <div className="text-actions">
                       <button onClick={() => mealForm(m)}>تعديل الصنف</button>
-                      <button onClick={() => move(m, "add")}>تصحيح رصيد</button>
+                      <button onClick={() => move(m, "remove")}>صرف استثنائي</button>
                       <button
                         onClick={() =>
                           setDetail({
@@ -1736,20 +1728,18 @@ export default function App() {
                                           : t.type === "add"
                                             ? "تصحيح / إضافة"
                                             : "صرف"}{" "}
-                                        {t.amount}
+                                        {displayQuantity(t.amount)}
                                       </b>
                                       <p>{t.reason || "دون ملاحظات"}</p>
                                       {t.movementKind === "purchase" && (
                                         <p>
                                           إجمالي المدفوع: {money(t.total)} ر.س ·
-                                          تاريخ السداد {t.paidAt}
+                                          تاريخ السداد {displayDate(t.paidAt)}
                                         </p>
                                       )}
                                       <small>
-                                        {String(t.createdAt)
-                                          .slice(0, 16)
-                                          .replace("T", " ")}{" "}
-                                        · الرصيد {t.balance}
+                                        {displayDateTime(t.createdAt)}{" "}
+                                        · الرصيد {displayQuantity(t.balance)}
                                       </small>
                                     </div>
                                   ))}
@@ -1784,7 +1774,7 @@ export default function App() {
                   isStaff ? "استحقاق واضح. تحصيل موثق." : "سجل إيواء خيلك",
                 )}
                 <div className="income-summary">
-                  <span>المحصل في {month}</span>
+                  <span>التحصيل في {displayMonth(month)}</span>
                   <strong>
                     {money(stats.collected)} <small>ر.س</small>
                   </strong>
@@ -1828,7 +1818,7 @@ export default function App() {
                           </span>
                         </div>
                         <p className="muted">
-                          {h.ownerName} · {h.dueDate || "حدد تاريخ الاستحقاق"}
+                          {h.ownerName} · {h.dueDate ? displayDate(h.dueDate) : "حدد تاريخ الاستحقاق"}
                         </p>
                         <div className="big-number">
                           {money(horseAccount(s, h, today()).outstanding)}{" "}
@@ -1875,7 +1865,7 @@ export default function App() {
                             {money(i.amount)} <small>ر.س</small>
                           </div>
                           <p className="muted small">
-                            الاستحقاق {i.dueDate} · التحصيل{" "}
+                            الاستحقاق {displayDate(i.dueDate)} · التحصيل{" "}
                             {businessDay(i.collectedAt)}
                           </p>
                           <ReceiptDetails receipt={i} />
@@ -1948,7 +1938,7 @@ export default function App() {
                       {isFeedPurchase(expenseState, e)
                         ? "مشتريات العلف في"
                         : "تكلفة"}{" "}
-                      {month}: {money(expensePlan(s, e, month))} ر.س{" "}
+                      {displayMonth(month)}: {money(expensePlan(s, e, month))} ر.س{" "}
                       {expenseIsShared(e)
                         ? expenseHorseCount
                           ? `÷ ${expenseHorseCount} خيل خلال الشهر`
@@ -1963,7 +1953,7 @@ export default function App() {
                     )}
                     <div className="payment-summary">
                       <span>
-                        سداد يخص {month}: {money(expensePaid(s, e.id, month))}{" "}
+                        سداد يخص {displayMonth(month)}: {money(expensePaid(s, e.id, month))}{" "}
                         ر.س
                       </span>
                       <b>
@@ -2026,7 +2016,7 @@ export default function App() {
                   </section>
                 ))}
                 <section className="card">
-                  <h2>سجل سداد مصروفات {month}</h2>
+                  <h2>سجل سداد مصروفات {displayMonth(month)}</h2>
                   {s.expensePayments
                     .filter(
                       (p) =>
@@ -2050,7 +2040,7 @@ export default function App() {
                           </b>
                         </div>
                         <p className="small muted">
-                          دُفع {p.paidAt} · يخص {p.period}{" "}
+                          دُفع {displayDate(p.paidAt)} · يخص {displayMonth(p.period)}{" "}
                           {p.notes ? `· ${p.notes}` : ""}
                         </p>
                         {p.status === "void" ? (
@@ -2138,12 +2128,12 @@ export default function App() {
                             : "سجل فقط"}
                         </span>
                       </div>
-                      <p className="muted">{o.phoneNumber || "بدون جوال"}</p>
+                      <p className="muted">{o.phoneNumber ? displayIdentifier(o.phoneNumber) : "بدون جوال"}</p>
                       {o.email && <p className="muted ltr">{o.email}</p>}
                       <p>
-                        {horses.filter((h) => h.status !== "archived").length}{" "}
+                        {displayNumber(horses.filter((h) => h.status !== "archived").length)}{" "}
                         خيل نشطة ·{" "}
-                        {horses.filter((h) => h.status === "archived").length}{" "}
+                        {displayNumber(horses.filter((h) => h.status === "archived").length)}{" "}
                         مؤرشفة
                       </p>
                       <p className="muted">
@@ -2227,7 +2217,7 @@ export default function App() {
                       </span>
                     </div>
                     <p className="muted ltr">{u.email}</p>
-                    <p className="muted">{u.phoneNumber}</p>
+                    <p className="muted">{displayIdentifier(u.phoneNumber)}</p>
                     {u.email?.toLowerCase() === "amjadoh@gmail.com" ? (
                       <p className="muted">المدير الأساسي</p>
                     ) : (
@@ -2326,7 +2316,7 @@ export default function App() {
                 {heading("التنبيهات وآخر التغييرات")}
                 {isStaff && pending.length > 0 && (
                   <Button kind="gold" onClick={() => go("requests")}>
-                    {pending.length} طلبات تنتظر مراجعتك
+                    {displayNumber(pending.length)} طلبات تنتظر مراجعتك
                   </Button>
                 )}
                 {s.activities
@@ -2338,7 +2328,7 @@ export default function App() {
                       <b>{actionLabel(l.action)}</b>
                       <p>{l.performedByName || "الإدارة"}</p>
                       <small>
-                        {String(l.createdAt).slice(0, 16).replace("T", " ")}
+                        {displayDateTime(l.createdAt)}
                       </small>
                     </div>
                   ))}
@@ -2456,7 +2446,7 @@ export default function App() {
         )}
       </main>
       {a && (
-        <nav aria-label="التنقل الرئيسي">
+        <nav className="bottom-nav" aria-label="التنقل الرئيسي">
           {nav.map(([key, label, Icon]) => {
             const I = Icon as typeof LayoutDashboard;
             return (
@@ -2601,7 +2591,7 @@ function MenuLink({
     <button className="list-link" onClick={onClick}>
       {icon}
       <span>{label}</span>
-      {!!count && <b className="pill">{count}</b>}
+      {!!count && <b className="pill">{displayNumber(count)}</b>}
       <ChevronLeft size={18} />
     </button>
   );
@@ -2662,10 +2652,11 @@ function FormView({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (!photoBusy) onSubmit(v);
+        if (!photoBusy && (!form.feeding || !feedingFormError(v.feeding || []))) onSubmit(v);
       }}
     >
       {form.note && <p className="notice">{form.note}</p>}
+      {form.feeding && feedingFormError(v.feeding || []) && <p className="notice error" role="alert">{feedingFormError(v.feeding || [])}</p>}
       {form.horsePhoto && (
         <section className="photo-field">
           <span>صورة الخيل (اختيارية)</span>
@@ -2779,6 +2770,7 @@ function FormView({
               </select>
             ) : f.type === "textarea" ? (
               <textarea
+                required={f.required}
                 maxLength={500}
                 value={v[f.name] ?? ""}
                 onChange={(e) => update(f.name, e.target.value)}
@@ -2803,123 +2795,7 @@ function FormView({
             )}
           </label>
         ))}
-      {form.feeding && (
-        <fieldset>
-          <legend>برنامج التغذية</legend>
-          <p className="muted small">
-            اختر يوميًا وأدخل إجمالي كمية اليوم، أو عدد مرات بالشهر وأدخل كمية
-            المرة وعدد المرات. وحدة الاستهلاك وسعرها من المخزون.
-          </p>
-          {(v.feeding || []).map((f: any, i: number) => {
-            const change = (values: Record<string, any>) =>
-              update(
-                "feeding",
-                v.feeding.map((x: any, j: number) =>
-                  i === j ? { ...x, ...values } : x,
-                ),
-              );
-            const unit = feedingMeasure(
-              state.mealTypes.find((m) => m.id === f.mealTypeId) || {},
-            ).unit;
-            return (
-              <div className="feeding-item" key={i}>
-                <label className="field">
-                  <span>الصنف</span>
-                  <select
-                    aria-label={`نوع التغذية ${i + 1}`}
-                    required
-                    value={f.mealTypeId}
-                    onChange={(e) => change({ mealTypeId: e.target.value })}
-                  >
-                    {state.mealTypes.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} ({feedingMeasure(m).unit})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>التكرار</span>
-                  <select
-                    aria-label={`تكرار التغذية ${i + 1}`}
-                    value={f.frequency || "daily"}
-                    onChange={(e) =>
-                      change({
-                        frequency: e.target.value,
-                        timesPerMonth: f.timesPerMonth || 7,
-                      })
-                    }
-                  >
-                    <option value="daily">يومي</option>
-                    <option value="monthly">عدد مرات بالشهر</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>
-                    {f.frequency === "monthly"
-                      ? "الكمية في المرة"
-                      : "إجمالي كمية اليوم"}{" "}
-                    ({unit})
-                  </span>
-                  <input
-                    type="number"
-                    min="0.001"
-                    step="0.001"
-                    required
-                    value={f.quantity}
-                    onChange={(e) => change({ quantity: e.target.value })}
-                  />
-                </label>
-                {f.frequency === "monthly" && (
-                  <label className="field">
-                    <span>عدد المرات بالشهر</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="1000"
-                      step="1"
-                      required
-                      value={f.timesPerMonth || ""}
-                      onChange={(e) =>
-                        change({ timesPerMonth: e.target.value })
-                      }
-                    />
-                  </label>
-                )}
-                <button
-                  type="button"
-                  className="button outline"
-                  onClick={() =>
-                    update(
-                      "feeding",
-                      v.feeding.filter((_: any, j: number) => i !== j),
-                    )
-                  }
-                >
-                  إزالة الصنف
-                </button>
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            className="button outline"
-            disabled={!state.mealTypes.length}
-            onClick={() =>
-              update("feeding", [
-                ...(v.feeding || []),
-                {
-                  mealTypeId: state.mealTypes[0]?.id,
-                  quantity: 1,
-                  frequency: "daily",
-                },
-              ])
-            }
-          >
-            إضافة نوع تغذية
-          </button>
-        </fieldset>
-      )}
+      {form.feeding && <FeedingEditor plans={v.feeding || []} meals={state.mealTypes} month={today().slice(0,7)} onChange={plans=>update("feeding",plans)} />}
       {form.horses && v.allocationScope === "selected" && (
         <fieldset>
           <legend>ربط المصروف بالخيل</legend>

@@ -42,6 +42,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Verify notification and inventory access rules in an isolated emulator
+        env:
+          QA_BACKEND_MODULES: ${{ runner.temp }}/alatheel-backend
+        run: |
+          npm install --prefix "$QA_BACKEND_MODULES" --no-save firebase-tools@15.33.0 @firebase/rules-unit-testing@5.0.0 firebase@12.13.0
+          "$QA_BACKEND_MODULES/node_modules/.bin/firebase" emulators:exec --config firebase.qa.json --project demo-alatheel --only firestore 'node scripts/rules-check.cjs'
       - uses: android-actions/setup-android@v3
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
@@ -68,7 +74,7 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-signature.txt
           grep -Fiq '2f508f35d389af0260d7d216fb750e2e49ecaeb4e4ffe5a9f928b1f7a7d6f83f' android/app/build/outputs/apk/release/apk-signature.txt
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/release/app-release.apk > android/app/build/outputs/apk/release/apk-identity.txt
-          grep -Fq "package: name='com.alatheel.stable' versionCode='8' versionName='1.7.0'" android/app/build/outputs/apk/release/apk-identity.txt
+          grep -Fq "package: name='com.alatheel.stable' versionCode='9' versionName='1.8.0'" android/app/build/outputs/apk/release/apk-identity.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Alatheel-Android-Google

@@ -9,6 +9,8 @@ import { invitationMessage, invitationFailureCode } from "./invitations";
 import { error as logError } from "firebase-functions/logger";
 import { assertOwnerLink, invitationRequested } from "./owners";
 import { storageCollection, normalizeRecord } from "./records";
+import { assertSession } from "./session-policy";
+import { notificationFunctions } from "./notification-server";
 import {
   applyCommand,
   emptyState,
@@ -30,6 +32,13 @@ const databaseId =
   "ai-studio-3316cd3a-14d1-4f71-adec-897324c5bb0e";
 const db = getFirestore(databaseId);
 const auth = getAuth();
+const notificationExports = notificationFunctions(db, databaseId, optionsForNotifications(), verifiedGoogle);
+export const updatePushDevice = notificationExports.updatePushDevice;
+export const synchronizeFeeding = notificationExports.synchronizeFeeding;
+export const remindCollections = notificationExports.remindCollections;
+export const inventoryAlert = notificationExports.inventoryAlert;
+export const deliverStaffAlert = notificationExports.deliverStaffAlert;
+function optionsForNotifications() { return { region: process.env.FUNCTIONS_REGION || "us-central1", maxInstances: 5 }; }
 const invitationsEnabled = process.env.INVITATIONS_ENABLED === "true";
 const options = {
   region: process.env.FUNCTIONS_REGION || "us-central1",
@@ -54,6 +63,8 @@ const needs: Record<string, Collection[]> = {
   "meal.delete": ["mealTypes", "horses"],
   "stock.move": ["mealTypes"],
   "stock.purchase": ["mealTypes"],
+  "stock.reconcile": ["mealTypes", "horses", "inventoryTransactions"],
+  "feeding.skip": ["horses", "mealTypes", "inventoryTransactions"],
   "expense.save": ["expenses", "horses", "mealTypes", "expensePayments"],
   "expense.delete": ["expenses", "expensePayments"],
   "expense.pay": ["expenses", "expensePayments"],
@@ -74,6 +85,8 @@ const needs: Record<string, Collection[]> = {
 // Financial mutations and rollover must see one transactional basis.
 for (const action of [
   "stock.purchase",
+  "stock.reconcile",
+  "feeding.skip",
   "finance.rollover",
   "finance.snapshot",
   "horse.save",
@@ -98,11 +111,15 @@ for (const action of [
       "income",
       "expensePayments",
       "financialPeriods",
+      "inventoryTransactions",
     ]),
   ] as Collection[];
+needs["stock.move"] = ["horses", "mealTypes", "inventoryTransactions"];
 async function verifiedGoogle(request: { auth?: { uid: string; token: any } }) {
   if (!request.auth)
     throw new HttpsError("unauthenticated", "سجل الدخول بحساب Google أولًا");
+  try { assertSession(request.auth.token.auth_time); }
+  catch (error) { throw new HttpsError("unauthenticated", error instanceof Error ? error.message : "انتهت جلسة الدخول"); }
   const u = await auth.getUser(request.auth.uid);
   const identity = {
     email: u.email,

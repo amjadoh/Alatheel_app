@@ -1,6 +1,6 @@
 import { money, shares } from "./domain";
 import type { State, Row } from "./domain";
-import { feedingMeasure, feedingUnitPrice, expenseFeedMeal } from "./feeding";
+import { feedingMeasure, feedingUnitPrice, expenseFeedMeal, feedingAtDate, feedingOnDate, feedingSkipped, horsePresentOn } from "./feeding";
 import { businessDay } from "./dates";
 import { stayDays } from "./boarding";
 
@@ -70,24 +70,23 @@ export function expenseShares(s: State, e: Row, month: string) {
   return targets.length ? shares(monthlyExpense(e, month), targets.sort()) : {};
 }
 
-function feedingItems(s: State, h: Row, days: number) {
-  return (h.feeding || []).map((f: any) => {
-    const meal = s.mealTypes.find((m) => m.id === f.mealTypeId);
-    const rate = meal ? feedingUnitPrice(meal) : 0;
-    return {
-      name: meal?.name || "صنف غير متاح",
-      unit: meal ? feedingMeasure(meal).unit : "وحدة",
-      quantity: Number(f.quantity),
-      frequency: f.frequency || "daily",
-      count: f.frequency === "monthly" ? Number(f.timesPerMonth) : days,
-      rate,
-      amount: money(
-        Number(f.quantity) *
-          rate *
-          (f.frequency === "monthly" ? Number(f.timesPerMonth) : days),
-      ),
-    };
-  });
+function feedingItems(s: State, h: Row, month: string) {
+  const groups = new Map<string, any>(), days = monthDays(month);
+  for (let i = 1; i <= days; i++) {
+    const day = `${month}-${String(i).padStart(2, "0")}`;
+    if (!horsePresentOn(h, day)) continue;
+    for (const f of feedingAtDate(h, day)) {
+      if (feedingSkipped(h, f.mealTypeId, day)) continue;
+      const monthly = f.frequency === "monthly", legacy = monthly && !f.schedule?.length;
+      if (!legacy && !feedingOnDate(f, day)) continue;
+      const meal = s.mealTypes.find(m => m.id === f.mealTypeId), rate = meal ? feedingUnitPrice(meal) : 0;
+      const key = JSON.stringify([f.mealTypeId, f.quantity, f.frequency || "daily", rate, legacy]);
+      const item = groups.get(key) || { name: meal?.name || "صنف غير متاح", unit: meal ? feedingMeasure(meal).unit : "وحدة", quantity: Number(f.quantity), frequency: f.frequency || "daily", count: 0, rate, estimatedSchedule: legacy };
+      item.count += legacy ? Number(f.timesPerMonth) / days : 1;
+      groups.set(key, item);
+    }
+  }
+  return [...groups.values()].map(f => ({ ...f, count: Math.round(f.count * 1e8) / 1e8, amount: money(f.quantity * f.rate * f.count) }));
 }
 
 export function horseCost(s: State, h: Row, month: string) {
@@ -111,15 +110,7 @@ export function horseCost(s: State, h: Row, month: string) {
     };
   }
   const days = stayDays(h, month);
-  const foodItems = feedingItems(s, h, days).map((f: any) =>
-    f.frequency === "monthly"
-      ? {
-          ...f,
-          count: money((f.count * days) / monthDays(month)),
-          amount: money((f.amount * days) / monthDays(month)),
-        }
-      : f,
-  );
+  const foodItems = feedingItems(s, h, month);
   const expenseItems = s.expenses
     .filter((e) => !isFeedPurchase(s, e))
     .map((e) => ({
@@ -183,11 +174,11 @@ export function costs(s: State, month: string) {
   }
   const active = s.horses.filter((h) => h.status !== "archived");
   const feeding = money(
-    active.reduce(
+    s.horses.reduce(
       (sum, h) =>
         sum +
         money(
-          feedingItems(s, h, monthDays(month)).reduce(
+          feedingItems(s, h, month).reduce(
             (subtotal: number, f: any) => subtotal + f.amount,
             0,
           ),

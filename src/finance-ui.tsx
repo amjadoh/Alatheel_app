@@ -10,9 +10,15 @@ import {
 } from "lucide-react";
 import type { Row, State } from "./service";
 import { financialSummary, horseFinance } from "../functions/src/finance";
+import {
+  displayAmount,
+  displayMonth,
+  displayNumber,
+  displayPrice,
+  displayQuantity,
+} from "./format";
 
-export const amount = (v: number) =>
-  v.toLocaleString("ar-SA", { maximumFractionDigits: 2 });
+export const amount = displayAmount;
 export function HorsePhoto({
   horse,
   large = false,
@@ -67,7 +73,7 @@ export function HorseFinancialPanel({
     <section className="horse-finance">
       <div className="section-heading compact">
         <h2>حساب {horse.name}</h2>
-        <span className="pill">{month}</span>
+        <span className="pill">{displayMonth(month)}</span>
       </div>
       <div className="finance-mini-grid">
         {!f.privateHorse && (
@@ -195,7 +201,7 @@ export function FinancialDashboard({
   return (
     <>
       <section className="finance-headline">
-        <p className="eyebrow">وضع الإسطبل · {month}</p>
+        <p className="eyebrow">وضع الإسطبل · {displayMonth(month)}</p>
         {closed ? (
           <p className="notice">
             شهر مغلق تلقائيًا · الأسعار والكميات والحسابات محفوظة كما كانت عند
@@ -299,7 +305,7 @@ export function FinancialDashboard({
           <strong className={f.outstanding ? "value-negative" : ""}>
             {amount(f.outstanding)}
           </strong>
-          <small>{f.debtCount} خيل · حتى نهاية الشهر، شامل السابق</small>
+          <small>{displayNumber(f.debtCount)} خيل · حتى نهاية الشهر، شامل السابق</small>
         </button>
       </div>
       <div className="quick-actions">
@@ -337,7 +343,7 @@ export function FinancialDashboard({
           <span className="pill">حركة نقدية</span>
         </div>
         <div className="ledger">
-          <span>مقبوضات الشهر</span>
+          <span>التحصيل خلال الشهر</span>
           <b>{amount(f.collected)} ر.س</b>
           <span>مدفوعات الشهر الفعلية</span>
           <b>{amount(f.paid)} ر.س</b>
@@ -397,16 +403,16 @@ export function FinancialDashboard({
         <h2>يحتاج متابعة</h2>
         {f.incompleteCount > 0 && (
           <p className="warning">
-            {f.incompleteCount} خيل ببيانات تغذية غير مكتملة.
+            {displayNumber(f.incompleteCount)} خيل ببيانات تغذية غير مكتملة.
           </p>
         )}
         {f.lossCount > 0 && (
           <p className="value-negative">
-            {f.lossCount} خيل تكلفته أعلى من دخله.
+            {displayNumber(f.lossCount)} خيل تكلفته أعلى من دخله.
           </p>
         )}
         {f.unpaidExpenseCount > 0 && (
-          <p>{f.unpaidExpenseCount} مصروفات لهذه الفترة لم يكتمل سدادها.</p>
+          <p>{displayNumber(f.unpaidExpenseCount)} مصروفات لهذه الفترة لم يكتمل سدادها.</p>
         )}
         {f.horses
           .filter(
@@ -473,7 +479,7 @@ export function FinancialDashboard({
         ) : (
           admin && (
             <button className="button outline" onClick={onSave}>
-              حفظ تقرير {month}
+              حفظ تقرير {displayMonth(month)}
             </button>
           )
         )}
@@ -502,9 +508,9 @@ export function FinancialDashboard({
               />
               {h.foodItems.map((item: any, i: number) => (
                 <p className="small" key={i}>
-                  {item.name}: {item.quantity} {item.unit}
+                  {item.name}: {displayQuantity(item.quantity)} {item.unit}
                   {item.frequency === "monthly" ? "/مرة" : "/يوم"} ×{" "}
-                  {amount(item.rate)} × {item.count ?? h.days}{" "}
+                  {displayPrice(item.rate)} × {displayNumber(item.count ?? h.days)}{" "}
                   {item.frequency === "monthly" ? "مرات بالشهر" : "يومًا"} ={" "}
                   {amount(item.amount)} ر.س
                 </p>

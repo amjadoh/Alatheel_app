@@ -5,6 +5,12 @@ import { Share } from "@capacitor/share";
 import { State } from "./service";
 import { businessDay } from "../functions/src/dates";
 import {
+  displayAmount,
+  displayMonth,
+  displayNumber,
+  formatQuantity,
+} from "./format";
+import {
   financialSummary,
   horseFinance,
   expensePaid,
@@ -181,7 +187,7 @@ export async function exportExcel(
         horseCost(s, h, month).foodItems.map((x: any) => [
           h.name,
           x.name,
-          x.quantity + " " + x.unit,
+          formatQuantity(x.quantity) + " " + x.unit,
           x.frequency === "monthly" ? "كمية المرة" : "إجمالي يومي",
           x.count,
           x.amount,
@@ -305,6 +311,25 @@ export async function exportExcel(
     });
     sheet.addRow(headers);
     rows.forEach((r) => sheet.addRow(r));
+    // Retain actual numeric cell values for formulas and sorting. Only their display changes.
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+      row.eachCell((cell, columnNumber) => {
+        if (typeof cell.value !== "number") return;
+        const header = headers[columnNumber - 1];
+        const unitPrice = header.includes("سعر");
+        const monetary =
+          /ريال|رسوم|تحصيل|متبقي|تكلفة|مصروفات|إجمالي|الدخل|نتيجة|المبلغ|القيمة|قيمة|مقدم|التزام|سداد|المتبقي/.test(
+            header,
+          );
+        cell.numFmt = unitPrice
+          ? "#,##0.00######;-#,##0.00######;0.00"
+          : monetary
+            ? "#,##0.00;-#,##0.00;0.00"
+            : "#,##0.########;-#,##0.########;0";
+        cell.alignment = { ...cell.alignment, readingOrder: "ltr" };
+      });
+    });
     sheet.columns.forEach((c) => (c.width = 24));
     sheet.getRow(1).font = { bold: true, color: { argb: "FFDFC265" } };
     sheet.getRow(1).fill = {
@@ -357,7 +382,7 @@ export async function exportPdf(s: State, month: string) {
   const pdf = new jsPDF();
   const rows = s.horses.map(
     (h) =>
-      `${h.name} | ${h.ownerName || ""} | الرسوم: ${h.boardingFee || 0} ر.س`,
+      `${h.name} | ${h.ownerName || ""} | الرسوم: ${displayAmount(h.boardingFee || 0)} ر.س`,
   );
   if (!rows.length) rows.push("لا توجد خيل مسجلة");
   for (let page = 0; page < Math.ceil(rows.length / 24); page++) {
@@ -374,11 +399,11 @@ export async function exportPdf(s: State, month: string) {
     ctx.font = 'bold 48px "Noto Sans Arabic"';
     ctx.fillText("إسطبل الأثيل — تقرير الخيل", 1170, 100);
     ctx.font = '28px "Noto Sans Arabic"';
-    ctx.fillText(month, 1170, 165);
+    ctx.fillText(displayMonth(month), 1170, 165);
     rows
       .slice(page * 24, page * 24 + 24)
       .forEach((r, i) => ctx.fillText(r, 1170, 250 + i * 55, 1100));
-    ctx.fillText(`صفحة ${page + 1}`, 1170, 1680);
+    ctx.fillText(`صفحة ${displayNumber(page + 1)}`, 1170, 1680);
     pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", 0, 0, 210, 297);
   }
   await save(pdf.output("blob"), `Alatheel-${month}.pdf`);

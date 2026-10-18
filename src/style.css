@@ -857,7 +857,7 @@ svg {
 .actions > * {
   flex: 1;
 }
-.app > nav {
+.app > .bottom-nav {
   display: flex;
   flex-shrink: 0;
   justify-content: space-around;
@@ -866,7 +866,7 @@ svg {
   background: #fffdf7;
   box-shadow: 0 -6px 20px #17191604;
 }
-.app > nav > button {
+.app > .bottom-nav > button {
   border: 0;
   background: transparent;
   color: #858276;
@@ -880,14 +880,14 @@ svg {
   gap: 5px;
   position: relative;
 }
-.app > nav > button span {
+.app > .bottom-nav > button span {
   font-size: 10px;
   font-weight: 600;
 }
-.app > nav > button.active {
+.app > .bottom-nav > button.active {
   color: var(--ink);
 }
-.app > nav > button.active:before {
+.app > .bottom-nav > button.active:before {
   content: "";
   position: absolute;
   top: -9px;
@@ -1429,3 +1429,15 @@ legend {
     animation: none !important;
   }
 }
+
+/* The account popover has its own layout, independent of bottom navigation. */
+.account-popover{display:block;direction:rtl;text-align:right;width:300px;max-height:calc(100dvh - 115px);overflow-y:auto;overscroll-behavior:contain}
+.account-menu-profile{display:flex;align-items:center;gap:10px;margin-bottom:12px;min-width:0}
+.account-menu-profile>div{flex:1;min-width:0}.account-menu-profile strong{display:block;font-size:15px;overflow-wrap:anywhere}.account-menu-profile small{display:block;color:var(--muted);font-size:11px;margin-top:5px}
+.account-profile-avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;background:#ebe6d7;overflow:hidden}.account-profile-avatar img{width:100%;height:100%;object-fit:cover}
+.account-close{border:0;background:none;min-height:40px;min-width:30px;display:grid;place-items:center;color:var(--muted);flex-shrink:0}
+.account-popover>button{display:grid;grid-template-columns:20px minmax(0,1fr) 16px;gap:10px;min-height:49px;direction:rtl}.account-popover>button>span{min-width:0;line-height:1.7}.account-popover>button>svg{width:18px;height:18px}.account-popover>button>svg:last-child{width:15px;height:15px;color:var(--muted)}
+.session-note{font-size:11px;display:flex;align-items:center;gap:8px;padding:11px 7px;color:#346746;background:#e8efe5;border-radius:10px;margin-top:10px}
+.notification-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 0;border-bottom:1px solid var(--line);font-size:13px}.notification-toggle input{width:22px;height:22px;accent-color:#346746}.notification-page .button{margin-top:16px}
+.notification-row{display:flex;align-items:flex-start;gap:12px;width:100%;padding:16px 0;border:0;border-bottom:1px solid var(--line);background:none;color:inherit;text-align:right}.notification-row>svg{flex-shrink:0;margin-top:4px}.notification-row>span{min-width:0;flex:1}.notification-row b,.notification-row span span,.notification-row small{display:block}.notification-row span span{font-size:12px;line-height:1.9;margin-top:5px}.notification-row small{font-size:11px;color:var(--muted);margin-top:6px}.notification-row.unread b:before{content:'•';color:#946719;margin-left:7px}
+.big-number,.headline-amount strong,.finance-mini-grid b,.profit-banner strong,.ledger dd{font-variant-numeric:tabular-nums}.finance-mini-grid b,.profit-banner strong{overflow-wrap:anywhere}.account-short-name{unicode-bidi:isolate}

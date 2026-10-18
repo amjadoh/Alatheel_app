@@ -210,4 +210,3 @@ export function UpdateGate({
     </UpdateContext.Provider>
   );
 }
-

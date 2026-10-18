@@ -10,7 +10,7 @@ const requireQA = process.env.QA_NODE_MODULES
 const { chromium } = requireQA("playwright");
 const output = path.resolve(process.env.QA_OUTPUT || "qa-results");
 fs.mkdirSync(output, { recursive: true });
-const base = process.env.QA_BASE_URL || "http://127.0.0.1:5174";
+const base = process.env.QA_BASE_URL || `http://127.0.0.1:${process.env.QA_PORT || 5174}`;
 const report = { checks: [], errors: [] };
 let server, browser;
 async function check(name, fn) {
@@ -25,7 +25,7 @@ async function main() {
   if (!process.env.QA_BASE_URL) {
     server = spawn(
       process.execPath,
-      ["node_modules/vite/bin/vite.js", "--config", "vite.qa.config.ts"],
+      ["node_modules/vite/bin/vite.js", "--config", "vite.qa.config.ts", "--port", new URL(base).port],
       { stdio: "ignore" },
     );
     let ready = false;
@@ -62,7 +62,7 @@ async function main() {
     await page.clock.install({ time: new Date("2026-10-16T12:00:00Z") });
     await page.goto(base + "/tests/ui/app.html");
     const notes = page.getByRole("dialog", {
-      name: "ما الجديد في الأثيل 1.7.0؟",
+      name: "ما الجديد في الأثيل 1.8.0؟",
       exact: true,
     });
     await notes.waitFor();
@@ -164,8 +164,11 @@ async function main() {
           await page.screenshot({
             path: path.join(output, "account-menu.png"),
           });
+          const menuLayout=await page.locator(".account-popover").evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth,rows:[...el.querySelectorAll(":scope > button")].map(b=>{const r=b.getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};})}));
+          assert.ok(menuLayout.scroll<=menuLayout.width+1);
+          menuLayout.rows.forEach((r,i,rows)=>{assert.ok(r.height>=44);if(i)assert.ok(r.top>=rows[i-1].bottom-1);});
           await page
-            .getByRole("button", { name: "إغلاق قائمة الحساب", exact: true })
+            .getByRole("button", { name: "إغلاق القائمة", exact: true })
             .click();
           await nav.getByRole("button", { name: "الخيل", exact: true }).click();
           await page
@@ -336,6 +339,50 @@ async function main() {
           });
         },
       );
+      await check("Monthly feeding validates its two appointments and saves the exact schedule",async()=>{
+        await nav.getByRole("button",{name:"الخيل",exact:true}).click();
+        await page.locator(".horse-card").filter({hasText:"خيل ملك خاص تجريبي"}).click();
+        await page.getByRole("dialog").getByRole("button",{name:"تعديل",exact:true}).click();
+        const form=page.getByRole("dialog",{name:"تعديل بيانات الخيل",exact:true});
+        await form.getByLabel("تكرار التغذية 1",{exact:true}).selectOption("monthly");
+        await form.getByLabel("كمية التغذية 1",{exact:true}).fill("0.5");
+        await form.getByLabel("يوم التغذية 1 موعد 1",{exact:true}).selectOption("6");
+        await form.getByLabel("ترتيب التغذية 1 موعد 1",{exact:true}).selectOption("1");
+        await form.getByLabel("يوم التغذية 1 موعد 2",{exact:true}).selectOption("6");
+        await form.getByLabel("ترتيب التغذية 1 موعد 2",{exact:true}).selectOption("1");
+        await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();
+        assert.match(await form.textContent(),/موعد تغذية مكرر/);
+        await form.getByLabel("ترتيب التغذية 1 موعد 2",{exact:true}).selectOption("3");
+        await page.screenshot({path:path.join(output,"feeding-schedule.png")});
+        await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();
+        await form.waitFor({state:"detached"});
+        const s=await snapshot(page),plan=s.horses.find(h=>h.id==="private").feeding[0];
+        assert.equal(plan.timesPerMonth,2);assert.deepEqual(plan.schedule,[{weekday:6,ordinal:1},{weekday:6,ordinal:3}]);
+      });
+      await check("Inventory activation and actual reconciliation change quantities without duplicating cash",async()=>{
+        await nav.getByRole("button",{name:"المخزون",exact:true}).click();
+        const before=await snapshot(page);
+        await page.getByRole("button",{name:"تأكيد الرصيد وتفعيل الخصم",exact:true}).click();
+        let form=page.getByRole("dialog");
+        await form.getByLabel(/الموجود فعليًا/).fill("10");await form.getByLabel(/سبب المطابقة/).fill("جرد تجريبي");
+        await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();await form.waitFor({state:"detached"});
+        let s=await snapshot(page);assert.equal(s.mealTypes[0].autoFeedingFrom,"2026-10-17");assert.equal(s.mealTypes[0].currentStock,10);
+        await page.getByRole("button",{name:"مطابقة الكمية الفعلية",exact:true}).click();form=page.getByRole("dialog");
+        await form.getByLabel(/الموجود فعليًا/).fill("8.5");await form.getByLabel(/سبب المطابقة/).fill("الكمية الفعلية");
+        await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();await form.waitFor({state:"detached"});
+        s=await snapshot(page);assert.equal(s.mealTypes[0].currentStock,8.5);assert.deepEqual(s.expensePayments,before.expensePayments);assert.deepEqual(s.expenses,before.expenses);assert.deepEqual(s.income,before.income);
+        await page.screenshot({path:path.join(output,"stock-reconciled.png")});
+      });
+      await check("Notifications expose exactly three staff options and the approved collection time",async()=>{
+        await page.getByRole("button",{name:"التنبيهات",exact:true}).click();
+        const panel=page.locator(".notification-page");await panel.waitFor();
+        assert.equal(await panel.getByRole("checkbox").count(),3);
+        assert.match(await panel.textContent(),/9.*مساءً بتوقيت السعودية/);
+        assert.doesNotMatch(await panel.textContent(),/تصل الإشعارات للجوال|الانقطاع المؤقت/);
+        await panel.getByLabel("انخفاض المخزون",{exact:true}).uncheck();
+        assert.equal(await panel.getByLabel("انخفاض المخزون",{exact:true}).isChecked(),false);
+        await page.screenshot({path:path.join(output,"notifications.png")});
+      });
     }
     await context.close();
   }

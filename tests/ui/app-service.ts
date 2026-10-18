@@ -14,6 +14,7 @@ export type {
   Role,
 } from "../../functions/src/domain";
 let s = emptyState();
+export function getNotificationServices(){return null as any;}
 const a: Actor = {
   uid: "qa",
   displayName: "مدير تجريبي",

@@ -33,7 +33,7 @@ test("private horse shows its cost and never shows owner balance or collection c
       staff: true,
     }),
   );
-  assert.match(html, /١٬٨٠٠/);
+  assert.match(html, /1,800\.00/);
   assert.match(html, /تكلفته المقدّرة/);
   assert.doesNotMatch(
     html,

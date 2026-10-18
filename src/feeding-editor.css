@@ -1,0 +1,11 @@
+.feeding-editor .feeding-item { min-width: 0; }
+.feeding-editor h4 { margin: 0 0 14px; }
+.feeding-slots { display: grid; gap: 12px; }
+.feeding-slot { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border: 1px solid var(--line, #e4dfd2); border-radius: 14px; padding: 12px; }
+.feeding-slot > b { grid-column: 1 / -1; }
+.feeding-slot .field { margin: 0; min-width: 0; }
+.feeding-slot select { min-width: 0; width: 100%; }
+.feeding-plan-summary { border-bottom: 1px solid var(--line, #e4dfd2); padding-block: 8px; }
+.feeding-plan-summary p { margin-block: 6px; }
+.stock-automatic-note { margin-block: 12px; }
+@media (max-width: 350px) { .feeding-slot { grid-template-columns: 1fr; } }

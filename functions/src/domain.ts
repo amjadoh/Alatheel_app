@@ -1,5 +1,8 @@
 /** Shared, deterministic rules; the server is the authority for every write. */
-import { feedingMeasure, expenseFeedMeal } from "./feeding";
+import { feedingMeasure, expenseFeedMeal, validateFeedingSchedule, addFeedingDays,
+  previousFeedingDay, stockPrecision, feedingAtDate, feedingOnDate,
+  feedingSkipped, horsePresentOn } from "./feeding";
+import { consumeScheduledFeeding, hasPendingFeeding, reverseFeedingPortions } from "./feeding-stock";
 import { monthlyExpense } from "./estimates";
 import {
   expensePaid,
@@ -182,7 +185,8 @@ export function applyCommand(
 ): State {
   ensure(!a.disabled, "الحساب معطل");
   ensure(/^[a-zA-Z0-9_-]{6,100}$/.test(c.requestId), "معرف العملية غير صحيح");
-  const s = structuredClone(input),
+  let s = structuredClone(input);
+  const
     d = c.data ?? {},
     today = businessDay(now);
   let ownerId: string | undefined;
@@ -192,6 +196,11 @@ export function applyCommand(
     return s;
   if (!["request.create", "request.accept", "profile.save"].includes(c.action))
     ensure(staff(a), "هذه العملية متاحة للإدارة والموظف فقط");
+  if (staff(a) && (financialActions.has(c.action) || c.action === "stock.move")) {
+    s = consumeScheduledFeeding(s, previousFeedingDay(today), now);
+    ensure(!hasPendingFeeding(s, previousFeedingDay(today)),
+      "جارٍ تحديث استهلاك المخزون للفترة السابقة؛ أعد المحاولة بعد اكتمال المزامنة");
+  }
   if (financialActions.has(c.action)) closePeriods(s, today);
   switch (c.action) {
     case "finance.rollover":
@@ -316,14 +325,27 @@ export function applyCommand(
           Number.isInteger(timesPerMonth) && timesPerMonth <= 1000,
           "عدد مرات التغذية يجب أن يكون عددًا صحيحًا لا يتجاوز 1000",
         );
+        const schedule = frequency === "monthly"
+          ? validateFeedingSchedule(f.schedule, timesPerMonth) : undefined;
         return {
           mealTypeId: f.mealTypeId,
           quantity: num(f.quantity, "كمية التغذية", 0.001),
           frequency,
           ...(frequency === "monthly" ? { timesPerMonth } : {}),
+          ...(schedule ? { schedule } : {}),
         };
       });
       ensure(feeding.length <= 20, "الحد الأقصى 20 نوع تغذية");
+      ensure(new Set(feeding.map((f: any) => f.mealTypeId)).size === feeding.length,
+        "لا يمكن تكرار صنف التغذية لنفس الخيل");
+      let feedingHistory = old?.feedingHistory;
+      const historicalFeeding = feedingHistory?.length || feeding.some((f: any) => f.schedule) ||
+        feeding.some((f: any) => s.mealTypes.some(m => m.id === f.mealTypeId && m.autoFeedingFrom));
+      if (historicalFeeding && JSON.stringify(feeding) !== JSON.stringify(old?.feeding || [])) {
+        feedingHistory = [...(old?.feedingHistory || (old ? [{ from: "0000-00-00", feeding: structuredClone(old.feeding || []), createdAt: old.createdAt || now }] : [])),
+          { from: today, feeding: structuredClone(feeding), createdAt: now, requestId: c.requestId }];
+        ensure(feedingHistory.length <= 1000, "سجل خطط التغذية يحتاج ترحيلًا قبل التعديل");
+      }
       if (old?.accountVersion) {
         ensure(
           d.status !== "private",
@@ -394,6 +416,7 @@ export function applyCommand(
         status: d.status,
         boardingFee: num(d.boardingFee, "الرسوم"),
         feeding,
+        ...(feedingHistory ? { feedingHistory } : {}),
         notes: text(d.notes),
         photoURL: horsePhoto(d.photoURL ?? old?.photoURL ?? ""),
         createdAt: old?.createdAt ?? now,
@@ -415,6 +438,8 @@ export function applyCommand(
         "الخروج يجب أن يكون بين الدخول واليوم",
       );
       assertOpenPeriod(s, exit);
+      reverseFeedingPortions(s, h, day => day > exit, c.requestId, now,
+        "تصحيح استهلاك بعد تاريخ خروج الخيل");
       const stays = h.stayPeriods || [{ entryDate: h.entryDate || exit }];
       ensure(!stays[stays.length - 1].exitDate, "فترة الإقامة مغلقة بالفعل");
       stays[stays.length - 1].exitDate = exit;
@@ -471,7 +496,13 @@ export function applyCommand(
         `يوجد صنف مشابه: ${similar.map((m) => m.name).join("، ")}. راجع الأصناف أو أكد أنه صنف مختلف`,
       );
       const measure = feedingMeasure({ ...old, ...d });
+      if (old?.autoFeedingFrom) {
+        const oldMeasure = feedingMeasure(old);
+        ensure(d.unit === old.unit && measure.unit === oldMeasure.unit && measure.unitsPerPurchaseUnit === oldMeasure.unitsPerPurchaseUnit,
+          "لا يمكن تغيير وحدة صنف مفعل للخصم التلقائي؛ أنشئ صنفًا مستقلًا للوحدة الجديدة");
+      }
       put(s, "mealTypes", {
+        ...old,
         id,
         name,
         unit: required(d.unit, "الوحدة"),
@@ -508,7 +539,7 @@ export function applyCommand(
           !s.expensePayments.some((p) => p.id === paymentId),
         "عملية الشراء مسجلة بالفعل",
       );
-      m.currentStock = money(Number(m.currentStock || 0) + amount);
+      m.currentStock = stockPrecision(Number(m.currentStock || 0) + amount);
       // Latest purchase rate is used only for the open month's estimate; the invoice keeps its exact total.
       m.pricePerUnit = Number((total / amount).toFixed(8));
       const purchase = {
@@ -574,6 +605,44 @@ export function applyCommand(
       });
       break;
     }
+    case "stock.reconcile": {
+      const meal = find(s, "mealTypes", id);
+      const actual = num(d.actualQuantity, "الكمية الفعلية");
+      const reason = required(d.reason, "سبب مطابقة المخزون");
+      const activating = !meal.autoFeedingFrom;
+      ensure(!activating || d.activate === true,
+        "أكد تفعيل الخصم التلقائي من الرصيد الفعلي");
+      const before = Number(meal.currentStock || 0), delta = stockPrecision(actual - before);
+      meal.currentStock = stockPrecision(actual);
+      meal.autoFeedingFrom = meal.autoFeedingFrom || addFeedingDays(today, 1);
+      // This count is an actual quantity now; the already elapsed part of today must not be deducted again.
+      meal.autoFeedingThrough = today;
+      meal.stockReconciledAt = now;
+      for (const horse of s.horses.filter(h => h.feeding?.some((f: any) => f.mealTypeId === id)))
+        if (!horse.feedingHistory?.length)
+          horse.feedingHistory = [{ from: "0000-00-00", feeding: structuredClone(horse.feeding || []), createdAt: now }];
+      s.inventoryTransactions.push({ id: c.requestId, mealTypeId: id, mealName: meal.name,
+        type: delta < 0 ? "remove" : "add", movementKind: activating ? "feeding_activation" : "reconciliation",
+        amount: Math.abs(delta), delta, previousBalance: before, balance: meal.currentStock,
+        reason, actualQuantity: actual, performedBy: a.uid, createdAt: now });
+      break;
+    }
+    case "feeding.skip": {
+      const horse = find(s, "horses", id);
+      const day = date(d.date), mealTypeId = required(d.mealTypeId, "صنف التغذية");
+      assertOpenPeriod(s, day);
+      ensure(day.slice(0, 7) === today.slice(0, 7), "اختر موعدًا من الشهر الحالي");
+      ensure(horsePresentOn(horse, day), "الخيل غير موجود بالإسطبل في هذا الموعد");
+      const plan = feedingAtDate(horse, day).find(f => f.mealTypeId === mealTypeId);
+      ensure(plan && feedingOnDate(plan, day), "لا توجد وجبة مجدولة لهذا الصنف في الموعد المحدد");
+      ensure(!feedingSkipped(horse, mealTypeId, day), "تم تخطي هذه الوجبة بالفعل");
+      const reason = required(d.reason, "سبب تخطي الوجبة");
+      horse.feedingSkips = [...(horse.feedingSkips || []),
+        { id: c.requestId, date: day, mealTypeId, reason, performedBy: a.uid, createdAt: now }];
+      ensure(horse.feedingSkips.length <= 1000, "سجل استثناءات التغذية يحتاج ترحيلًا قبل المتابعة");
+      reverseFeedingPortions(s, horse, date => date === day, c.requestId, now, reason, mealTypeId);
+      break;
+    }
     case "meal.delete":
       ensure(
         !s.horses.some((h) => h.feeding?.some((f: any) => f.mealTypeId === id)),
@@ -589,7 +658,7 @@ export function applyCommand(
       const m = find(s, "mealTypes", id),
         amount = num(d.amount, "الكمية", 0.01);
       ensure(["add", "remove"].includes(d.type), "حدد نوع الحركة");
-      const balance = money(
+      const balance = stockPrecision(
         m.currentStock + (d.type === "add" ? amount : -amount),
       );
       ensure(balance >= 0, "الكمية تتجاوز الرصيد المتاح");

@@ -7,14 +7,9 @@ import {
   accountRevision,
 } from "../functions/src/accounts";
 import { businessDay } from "../functions/src/dates";
-const money = (n: number) =>
-  Number(n || 0).toLocaleString("ar-SA", { maximumFractionDigits: 2 });
-const monthName = (m: string) =>
-  new Date(m + "-01T12:00:00Z").toLocaleDateString("ar-SA", {
-    calendar: "gregory",
-    month: "long",
-    year: "numeric",
-  });
+import { displayAmount, displayDate, displayMonthName, isolateNumber } from "./format";
+const money = displayAmount;
+const monthName = displayMonthName;
 const methods: Record<string, string> = {
   bank: "تحويل بنكي",
   cash: "نقدي",
@@ -25,10 +20,10 @@ export function ReceiptDetails({ receipt: r }: { receipt: Row }) {
   return (
     <details className="account-receipt">
       <summary>
-        {businessDay(r.collectedAt)} · {money(r.amount)} ر.س · {r.horseName}
+        {displayDate(r.collectedAt)} · {money(r.amount)} ر.س · {r.horseName}
       </summary>
       <p className="small muted">
-        سند تحصيل {r.id} · {methods[r.method] || "طريقة غير مسجلة"}
+        سند تحصيل {isolateNumber(String(r.id))} · {methods[r.method] || "طريقة غير مسجلة"}
       </p>
       {r.accountVersion ? (
         (r.allocations || []).map((x: any) => (
@@ -39,7 +34,7 @@ export function ReceiptDetails({ receipt: r }: { receipt: Row }) {
         ))
       ) : (
         <p className="small">
-          الاستحقاق {r.dueDate} · إيواء {money(r.boardingFee ?? r.amount)} ر.س
+          الاستحقاق {displayDate(r.dueDate)} · إيواء {money(r.boardingFee ?? r.amount)} ر.س
         </p>
       )}
       {r.advanceAmount > 0 && (
@@ -206,7 +201,7 @@ export function HorseAccount({
             </dl>
             <small>
               الاستحقاقات حتى نهاية {monthName(today.slice(0, 7))} · دفعات
-              المالك حتى {today}
+              المالك حتى {displayDate(today)}
             </small>
           </div>
           <div className="account-totals">
@@ -239,7 +234,7 @@ export function HorseAccount({
                   </span>
                 </div>
                 <p className="small">
-                  الاستحقاق {x.dueDate} · القيمة {money(x.amount)} ر.س
+                  الاستحقاق {displayDate(x.dueDate)} · القيمة {money(x.amount)} ر.س
                 </p>
                 <p className="small">
                   محصل {money(x.paid)} · متبقي {money(x.remaining)} ر.س
