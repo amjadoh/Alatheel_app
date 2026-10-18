@@ -150,7 +150,8 @@ export async function execute(c: any) {
     s,
     a,
     { ...c, requestId: c.requestId || crypto.randomUUID() },
-    "2026-10-16T12:00:00Z",
+    new URLSearchParams(location.search).get("scenario") === "inventory-plan"
+      ? new Date().toISOString() : "2026-10-16T12:00:00Z",
   );
   emit(s, a);
   if (
