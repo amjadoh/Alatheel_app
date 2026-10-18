@@ -7,6 +7,7 @@ import os
 version=__import__('json').loads(Path('package.json').read_text())['version']
 p=Path("scripts/android-smoke.sh").read_text()
 p=p.replace("system-images;android-35;google_apis;x86_64", "system-images;android-"+os.environ["ANDROID_QA_API"]+";google_apis;x86_64")
+p=p.replace("Signed APK installed and reached the Google sign-in screen without an Android crash.", "Signed APK upgraded in place and displayed the expected startup screen without an Android crash.")
 if os.environ["ANDROID_QA_API"] == "29":
     p=p.replace("grep -Eq 'Google|قوقل'", "grep -Fq 'تحديث مكوّن أندرويد'")
 needle="adb install -r apk/app-release.apk"
@@ -44,4 +45,5 @@ if grep -Fq "Process: com.alatheel.stable" android-qa/restart-crash.txt; then ex
 Path("android-upgrade-generated.sh").write_text(p)
 PY
 bash android-upgrade-generated.sh
+
 
