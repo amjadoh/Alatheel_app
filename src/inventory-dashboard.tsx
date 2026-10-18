@@ -21,7 +21,7 @@ export function InventoryItemNeeds({ item, end }: { item: ItemNeeds; end: string
       <dl><div><dt>احتياج الدورة المجدول</dt><dd>{displayQuantity(item.cycleQuantity)} {item.unit}</dd></div>
       {item.conversion !== 1 && <div><dt>يعادل للشراء</dt><dd>{displayQuantity(item.purchaseQuantity)} {item.purchaseUnit}</dd></div>}
       <div><dt>قيمة الناقص التقديرية</dt><dd>{item.cost === undefined && item.shortage > 0 ? "السعر غير مسجل" : `${displayAmount(item.cost || 0)} ر.س`}</dd></div></dl>
-      {item.horses.map(h => <div className="inventory-horse" key={h.id}><div><b>{h.name}</b><strong>{displayQuantity(h.quantity)} {item.unit}</strong></div><small>{displayNumber(h.dates.length)} موعدًا متبقيًا · {h.dates.map(displayDate).join("، ")}</small></div>)}
+      {item.horses.map(h => <div className="inventory-horse" key={h.id}><div><b>{h.name}</b><strong>{displayQuantity(h.quantity)} {item.unit}</strong></div><small>{displayNumber(h.dates.length)} موعدًا متبقيًا · {h.dates.length > 4 ? `${displayDate(h.dates[0])} — ${displayDate(h.dates.at(-1))}` : h.dates.map(displayDate).join("، ")}</small></div>)}
       {!!item.unscheduled.length && <p className="notice small">مواعيد غير محددة: {item.unscheduled.join("، ")}. لم تُدرج كمياتها في الاحتياج.</p>}
       {!item.horses.length && !item.unscheduled.length && <p className="muted small">لا توجد وجبات متبقية لهذا الصنف حتى نهاية الفترة.</p>}
       <p className="muted small">يشمل المواعيد المتبقية حتى نهاية يوم 27، ويستبعد الأيام المخصومة والوجبات المتخطاة. قيمة الشراء حسب آخر سعر؛ لا تسجل كمصروف إلا عند الشراء.</p>

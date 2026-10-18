@@ -569,6 +569,7 @@ async function main() {
       assert.match(clean(await rhodes.locator(".inventory-shortage").textContent()),/6 ربطة/);
       assert.match(clean(await card("المركزات").locator(".inventory-quantities").textContent()),/190 كجم/);
       assert.match(clean(await extra.locator(".inventory-quantities").textContent()),/8 كجم/);
+      await page.screenshot({path:path.join(output,`inventory-dashboard-${width}.png`)});
       await rhodes.locator("summary").click();
       assert.equal(await rhodes.locator(".inventory-horse").count(),8);
       assert.match(clean(await rhodes.locator(".inventory-horse").first().textContent()),/2 ربطة/);
