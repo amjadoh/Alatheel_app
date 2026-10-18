@@ -154,6 +154,7 @@ export function connect(callback: typeof emit) {
           subscribeData();
           subscriptions.push(
             onSnapshot(doc(db!, "users", current.uid), (profile) => {
+              if(stale())return;
               const u = profile.data();
               if (
                 u?.disabled ||

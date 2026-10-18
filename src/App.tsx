@@ -1258,7 +1258,7 @@ export default function App() {
                         <span>
                           {isStaff ? "الخيل في الإسطبل" : "خيلك المسجلة"}
                         </span>
-                        <strong>{money(active.length)}</strong>
+                        <strong>{displayNumber(active.length)}</strong>
                         <small>
                           عرض التفاصيل <ArrowUpLeft size={16} />
                         </small>
@@ -1366,7 +1366,7 @@ export default function App() {
                                 <small>بلغ حد التنبيه</small>
                               </span>
                               <b className="warning">
-                                {money(m.currentStock)} {m.unit}
+                                {displayQuantity(m.currentStock)} {m.unit}
                               </b>
                               <ChevronLeft size={18} />
                             </button>

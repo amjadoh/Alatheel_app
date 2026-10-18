@@ -223,10 +223,12 @@ export const operate = onCall(options, async (request) => {
           "توجد مصروفات قديمة تحتاج اعتماد توزيعها من المدير قبل التحصيل",
         );
       const next = applyCommand(state, actor, c);
+      let writes=0;
       for (const name of collections) {
         const before = new Map(state[name].map((r) => [r.id, r]));
         for (const row of next[name]) {
           if (JSON.stringify(before.get(row.id)) !== JSON.stringify(row)) {
+            ensure(++writes<=450,"حجم العملية يحتاج تقسيمًا؛ لم تُحفظ حركة جزئية");
             const { id, ...value } = row;
             for (const key of ["createdAt", "updatedAt", "collectedAt"])
               if (typeof value[key] === "string")
@@ -239,8 +241,10 @@ export const operate = onCall(options, async (request) => {
           }
           before.delete(row.id);
         }
-        for (const id of before.keys())
+        for (const id of before.keys()) {
+          ensure(++writes<=450,"حجم العملية يحتاج تقسيمًا؛ لم تُحفظ حركة جزئية");
           tx.delete(db.doc(`${storageCollection(name)}/${id}`));
+        }
       }
       return { ok: true };
     });
