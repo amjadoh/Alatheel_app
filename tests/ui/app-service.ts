@@ -113,7 +113,8 @@ if (
     "2026-10-16T12:00:00Z",
   );
 }
-let emit: (s: State, a: Actor | null, error?: string) => void = () => {};
+let emit: (s: State, a: Actor | null, error?: string, phase?: import("../../src/auth-recovery").AuthPhase) => void = () => {};
+export function retryLoginSession() { emit(s,a,undefined,"ready"); }
 if(new URLSearchParams(location.search).get("scenario")==="owner-alerts"){
   a.uid="owner";a.ownerRecordId="owner";a.role="owner";a.displayName="مالك تجريبي";
 }
@@ -122,6 +123,11 @@ export const inspectQA = () => structuredClone(s);
 (window as any).__alatheelQA = inspectQA;
 export function connect(fn: typeof emit) {
   emit = fn;
+  const scenario=new URLSearchParams(location.search).get("scenario");
+  if(scenario==="restoring-session"||scenario==="waiting-session"){
+    fn(emptyState(),null,scenario==="waiting-session"?"تعذر الاتصال التجريبي":undefined,scenario==="waiting-session"?"waiting":"restoring");
+    return ()=>{emit=()=>{};};
+  }
   fn(s, a);
   return () => {
     emit = () => {};

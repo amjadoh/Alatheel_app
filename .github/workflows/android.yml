@@ -29,6 +29,10 @@ jobs:
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
         run: node scripts/ui-check.cjs
+      - name: Verify saved Google session continuity without production accounts
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/auth-continuity-check.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

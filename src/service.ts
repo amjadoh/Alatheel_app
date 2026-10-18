@@ -1,14 +1,11 @@
 import { initializeApp } from "firebase/app";
 import {
-  getAuth,
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithCredential,
   signOut,
   User,
-  setPersistence,
-  browserLocalPersistence,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -24,6 +21,8 @@ import { Capacitor } from "@capacitor/core";
 import { App as NativeApp } from "@capacitor/app";
 import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import { assertSession,sessionExpiresAt } from "../functions/src/session-policy";
+import { createPersistentAuth } from "./persistent-auth";
+import { authFailureAction, type AuthPhase } from "./auth-recovery";
 import { androidPush,StaffPush,pushDeviceId } from "./native-push";
 import project from "./firebase-project.json";
 import { storageCollection, normalizeRecord } from "../functions/src/records";
@@ -51,7 +50,8 @@ const app = configured
       appId: import.meta.env.VITE_FIREBASE_APP_ID || project.appId,
     })
   : null;
-const auth = app ? getAuth(app) : null,
+const persistentAuth = app ? createPersistentAuth(app) : null;
+const auth = persistentAuth?.auth || null,
   db = app
     ? getFirestore(
         app,
@@ -68,7 +68,9 @@ let state: State = emptyState(),
   actor: Actor | null = null,
   user: User | null = null;
 let authError: string | undefined;
-let emit: (s: State, a: Actor | null, error?: string) => void = () => {};
+let authPhase: AuthPhase = "restoring";
+let retryAuthentication = () => {};
+let emit: (s: State, a: Actor | null, error?: string, phase?: AuthPhase) => void = () => {};
 let subscriptions: (() => void)[] = [];
 const publish = (error?: string) =>
   emit(
@@ -77,6 +79,7 @@ const publish = (error?: string) =>
       : { ...emptyState(), settings: state.settings },
     actor,
     error,
+    authPhase,
   );
 const stop = () => {
   subscriptions.forEach((fn) => fn());
@@ -85,6 +88,7 @@ const stop = () => {
 export function connect(callback: typeof emit) {
   emit = callback;
   if (!auth || !db || !functions) {
+    authPhase="signed-out";
     publish(
       "خدمة تسجيل الدخول غير مهيأة. لا يمكن الدخول حتى اكتمال ربط Google.",
     );
@@ -94,7 +98,7 @@ export function connect(callback: typeof emit) {
     state.settings = snap.exists() ? [{ ...snap.data(), id: "main" }] : [];
     publish();
   });
-  let disposed=false,persistenceConfigured=false,generation=0,expiresAt=0;
+  let disposed=false,generation=0,expiresAt=0,retryCount=0;
   let retryTimer:ReturnType<typeof setTimeout>|undefined,sessionTimer:ReturnType<typeof setTimeout>|undefined;
   const authenticate = async (current:User|null) => {
     const attempt=++generation;
@@ -105,13 +109,15 @@ export function connect(callback: typeof emit) {
     user = current;
     actor = null;
     state = emptyState();
+    authPhase = current ? "restoring" : "signed-out";
     publish(authError);
     if (!current) return;
     try {
-      if(!persistenceConfigured){await setPersistence(auth!,browserLocalPersistence);persistenceConfigured=true;}
+      await persistentAuth!.ready;
+      if(stale())return;
       const token=await current.getIdTokenResult();
       if(stale())return;
-      try{assertSession(token.claims.auth_time);}catch(e){throw Object.assign(e instanceof Error?e:new Error("انتهت الجلسة"),{code:"functions/unauthenticated"});}
+      try{assertSession(token.claims.auth_time);}catch(e){throw Object.assign(e instanceof Error?e:new Error("انتهت الجلسة"),{code:"auth/session-expired"});}
       expiresAt=sessionExpiresAt(token.claims.auth_time);
       sessionTimer=setTimeout(()=>{if(!stale())expireSession();},Math.max(0,expiresAt-Date.now()));
       await httpsCallable(functions!, "ensureProfile")({});
@@ -132,6 +138,7 @@ export function connect(callback: typeof emit) {
         if (!p || p.disabled) {
           stop();
           actor = null;
+          authPhase = "signed-out";
           publish("الحساب معطل أو غير متاح");
           void signOut(auth!);
           return;
@@ -146,6 +153,9 @@ export function connect(callback: typeof emit) {
           ownerRecordId: p.ownerRecordId,
           photoURL: current.photoURL || "",
         };
+        authPhase = "ready";
+        authError = undefined;
+        retryCount = 0;
         if (changed) {
           stop();
           state = emptyState();
@@ -178,27 +188,47 @@ export function connect(callback: typeof emit) {
       if(stale())return;
       authError = errorText(e);
       stop();
-      const code=(e as {code?:string}).code;
-      const accessFailure=["functions/permission-denied","functions/unauthenticated","auth/user-disabled","auth/user-token-expired","auth/id-token-revoked","permission-denied"].includes(code||"");
-      if(!accessFailure){publish(authError);retryTimer=setTimeout(()=>{if(!disposed&&auth?.currentUser?.uid===current.uid)void authenticate(current);},5000);return;}
+      const action=authFailureAction(e);
+      if(action!=="sign-out"){
+        authPhase=action==="block"?"blocked":"waiting";
+        publish(authError);
+        if(action==="retry"){
+          const delay=Math.min(30000,5000*2**Math.min(retryCount++,3));
+          retryTimer=setTimeout(async()=>{
+            if(stale())return;
+            try{await current.getIdToken(true);}catch(refreshError){
+              if(stale())return;
+              if(authFailureAction(refreshError)==="sign-out"){await logout(false);return;}
+            }
+            if(!stale())void authenticate(current);
+          },delay);
+        }
+        return;
+      }
       actor = null;
       state = emptyState();
+      authPhase = "signed-out";
       if (Capacitor.isNativePlatform())
         await FirebaseAuthentication.signOut().catch(() => {});
       await signOut(auth!).catch(() => {});
       publish(authError);
     }
   };
-  function expireSession(){authError="انتهت مدة الدخول البالغة 7 أيام؛ سجل الدخول عبر Google مجددًا";actor=null;stop();publish(authError);void logout(false);}
+  function expireSession(){authError="انتهت مدة الدخول البالغة 7 أيام؛ سجل الدخول عبر Google مجددًا";actor=null;authPhase="signed-out";stop();publish(authError);void logout(false);}
   function checkSession(){if(!disposed&&expiresAt&&Date.now()>=expiresAt)expireSession();}
-  const visibility=()=>{if(document.visibilityState==="visible")checkSession();};
+  const resume=()=>{checkSession();if(authPhase==="waiting")retryAuthentication();};
+  const visibility=()=>{if(document.visibilityState==="visible")resume();};
   document.addEventListener("visibilitychange",visibility);
   let removeResume:undefined|(()=>void);
-  if(Capacitor.isNativePlatform())void NativeApp.addListener("appStateChange",({isActive})=>{if(isActive)checkSession();}).then(h=>{if(disposed)void h.remove();else removeResume=()=>void h.remove();});
+  if(Capacitor.isNativePlatform())void NativeApp.addListener("appStateChange",({isActive})=>{if(isActive)resume();}).then(h=>{if(disposed)void h.remove();else removeResume=()=>void h.remove();});
   const unsub = onAuthStateChanged(auth, authenticate);
+  retryAuthentication=()=>{if(!disposed&&auth?.currentUser)void authenticate(auth.currentUser);};
+  const online=()=>{if(authPhase==="waiting")retryAuthentication();};
+  window.addEventListener("online",online);
   return () => {
     disposed=true;clearTimeout(retryTimer);clearTimeout(sessionTimer);
     document.removeEventListener("visibilitychange",visibility);removeResume?.();
+    window.removeEventListener("online",online);retryAuthentication=()=>{};
     stop();
     unsub();
     publicUnsub();
@@ -269,6 +299,7 @@ export function errorText(e: unknown) {
 export async function login() {
   authError = undefined;
   ensure(auth, "خدمة Google غير مهيأة بعد. تواصل مع مدير الإسطبل");
+  await persistentAuth!.ready;
   if (Capacitor.isNativePlatform()) {
     const result = await FirebaseAuthentication.signInWithGoogle();
     ensure(result.credential?.idToken, "لم يكتمل تسجيل الدخول");
@@ -282,6 +313,7 @@ export async function login() {
     await signInWithPopup(auth, provider);
   }
 }
+export function retryLoginSession(){retryAuthentication();}
 export async function logout(clearError=true) {
   if(clearError)authError = undefined;
   if(androidPush){await StaffPush.disable().catch(()=>{});if(functions&&auth?.currentUser)await httpsCallable(functions,"updatePushDevice")({action:"remove",deviceId:pushDeviceId()}).catch(()=>{});}

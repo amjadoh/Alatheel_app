@@ -32,6 +32,7 @@ import {
   connect,
   login,
   logout,
+  retryLoginSession,
   execute,
   member,
   errorText,
@@ -71,6 +72,7 @@ import {
 } from "../functions/src/finance";
 import { prepareHorsePhoto } from "./horse-photo";
 import { businessDay } from "../functions/src/dates";
+import type { AuthPhase } from "./auth-recovery";
 import { similarItems } from "../functions/src/inventory";
 import { stayDays } from "../functions/src/boarding";
 import {
@@ -167,6 +169,8 @@ function Empty({ text = "لا توجد سجلات بعد" }: { text?: string }) 
 export default function App() {
   const [s, setState] = useState<State>(emptyState()),
     [a, setActor] = useState<Actor | null>(null),
+    [authPhase, setAuthPhase] = useState<AuthPhase>("restoring"),
+    [authIssue, setAuthIssue] = useState(""),
     [tab, setTab] = useState("dashboard"),
     [form, setForm] = useState<Form | null>(null),
     [detail, setDetail] = useState<{
@@ -199,9 +203,11 @@ export default function App() {
     prevUid = useRef<string | null>(null);
   useEffect(
     () =>
-      connect((state, actor, e) => {
+      connect((state, actor, e, phase) => {
         setState(state);
         setActor(actor);
+        setAuthPhase(phase || (actor ? "ready" : "signed-out"));
+        setAuthIssue(e || "");
         if (e) setError(e);
         if (actor?.uid !== prevUid.current) {
           setTab("dashboard");
@@ -1134,11 +1140,11 @@ export default function App() {
               </span>
             </button>
           </div>
-        ) : (
+        ) : authPhase==="signed-out" ? (
           <button className="header-login" onClick={() => setLoginOpen(true)}>
             دخول الأعضاء <ArrowUpLeft size={16} />
           </button>
-        )}
+        ) : <span className="muted small">استعادة الحساب</span>}
       </header>
       {accountMenuOpen && a && (
         <>
@@ -1161,7 +1167,18 @@ export default function App() {
         </>
       )}
       <main ref={mainRef}>
-        {!a ? (
+        {!a && authPhase!=="signed-out" ? (
+          <section className="card session-restoring" dir="rtl" role="status" aria-live="polite">
+            <ShieldCheck size={28}/>
+            <h1>{authPhase==="blocked"?"تعذر فتح الحساب":"جارٍ استعادة حسابك…"}</h1>
+            {authPhase==="waiting" && <p>ننتظر الاتصال للتحقق من جلستك المحفوظة.</p>}
+            {(authPhase==="waiting"||authPhase==="blocked") && <>
+              {authIssue && <p className="notice error">{authIssue}</p>}
+              <button className="button gold" onClick={()=>retryLoginSession()}>إعادة المحاولة</button>
+              <button className="button" onClick={()=>void logout()}>تسجيل الخروج</button>
+            </>}
+          </section>
+        ) : !a ? (
           <>
             <div className="hero">
               <img src="/horses.jpg" alt="صورة توضيحية لخيل عربية" />

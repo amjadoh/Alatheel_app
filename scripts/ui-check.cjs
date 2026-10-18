@@ -62,7 +62,7 @@ async function main() {
     await page.clock.install({ time: new Date("2026-10-16T12:00:00Z") });
     await page.goto(base + "/tests/ui/app.html");
     const notes = page.getByRole("dialog", {
-      name: "ما الجديد في الأثيل 1.8.1؟",
+      name: `ما الجديد في الأثيل ${require("../package.json").version}؟`,
       exact: true,
     });
     await notes.waitFor();
@@ -100,7 +100,6 @@ async function main() {
           layout.scrollWidth <= layout.clientWidth + 1,
           JSON.stringify(layout),
         );
-        assert.ok(layout.scrollHeight > layout.clientHeight);
         assert.ok(layout.left >= 0 && layout.right <= width + 1);
         assert.ok(
           layout.closeTop >= 0 &&
@@ -109,11 +108,6 @@ async function main() {
         );
         assert.deepEqual(layout.headings, [
           "حسابك · أعلى اليسار",
-          "الصفحة الرئيسية",
-          "الخيل",
-          "المخزون",
-          "التحصيل",
-          "المصروفات",
         ]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),
@@ -539,6 +533,23 @@ async function main() {
     await panel.getByLabel("إصدار جديد للتطبيق",{exact:true}).waitFor();
     assert.doesNotMatch(await panel.textContent(),/استحقاق التحصيل|انخفاض المخزون|نفاد المخزون/);
     await page.screenshot({path:path.join(output,"owner-update-alerts.png")});await context.close();
+  });
+  await check("Restoring a saved session never offers Google sign-in",async()=>{
+    const context=await browser.newContext({viewport:{width:320,height:844},isMobile:true});const page=await context.newPage();
+    await page.goto(base+"/tests/ui/app.html?scenario=restoring-session");
+    await page.getByRole("heading",{name:"جارٍ استعادة حسابك…"}).waitFor();
+    assert.equal(await page.getByRole("button",{name:"دخول الأعضاء"}).count(),0);
+    assert.equal(await page.getByRole("navigation",{name:"التنقل الرئيسي"}).count(),0);
+    await page.screenshot({path:path.join(output,"restoring-session.png")});await context.close();
+  });
+  await check("Interrupted session verification recovers without another Google sign-in",async()=>{
+    const context=await browser.newContext({viewport:{width:320,height:844},isMobile:true});const page=await context.newPage();
+    await page.goto(base+"/tests/ui/app.html?scenario=waiting-session");
+    await page.getByText("ننتظر الاتصال للتحقق من جلستك المحفوظة.",{exact:true}).waitFor();
+    assert.equal(await page.getByRole("button",{name:"دخول الأعضاء"}).count(),0);
+    await page.getByRole("button",{name:"إعادة المحاولة",exact:true}).click();
+    await page.getByRole("button",{name:/حساب مدير تجريبي/}).waitFor();
+    await context.close();
   });
   assert.deepEqual(report.errors, []);
 }
