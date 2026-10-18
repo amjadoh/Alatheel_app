@@ -3,7 +3,9 @@ import { NotificationsPanel,useStaffNotifications } from "./notifications";
 import { displayAmount, displayNumber, displayQuantity, displayPrice, displayDate, displayMonth, isolateNumber, displayDateTime, displayIdentifier } from "./format";
 import { FeedingEditor, FeedingPlanSummary, feedingFormError } from "./feeding-editor";
 import { feedingAtDate, feedingOnDate, scheduledFeedingDates } from "../functions/src/feeding";
-import { useEffect, useRef, useState, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, ReactNode } from "react";
+import { inventoryNeeds } from "../functions/src/inventory-needs";
+import { InventoryDashboard, InventoryItemNeeds } from "./inventory-dashboard";
 import {
   LayoutDashboard,
   Package,
@@ -167,6 +169,13 @@ function Empty({ text = "لا توجد سجلات بعد" }: { text?: string }) 
   );
 }
 export default function App() {
+  const [inventoryDay, setInventoryDay] = useState(today());
+  useEffect(() => {
+    const refresh = () => setInventoryDay(today());
+    const timer = window.setInterval(refresh, 30000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, []);
   const [s, setState] = useState<State>(emptyState()),
     [a, setActor] = useState<Actor | null>(null),
     [authPhase, setAuthPhase] = useState<AuthPhase>("restoring"),
@@ -251,6 +260,7 @@ export default function App() {
       void handle.then((h) => h.remove());
     };
   }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen]);
+  const stockNeeds = useMemo(() => inventoryNeeds(s, inventoryDay), [s, inventoryDay]);
   const isStaff = !!a && staff(a),
     isAdmin = a?.role === "admin",
     name = s.settings[0]?.stableName || "إسطبل الأثيل",
@@ -1687,7 +1697,7 @@ export default function App() {
             {tab === "inventory" && isStaff && (
               <>
                 {heading(
-                  "الرصيد والحركة في مكان واحد",
+                  "احتياج التغذية حتى يوم 27",
                   <button
                     className="round-add"
                     aria-label={TERMS.registerItem}
@@ -1696,6 +1706,7 @@ export default function App() {
                     <Plus />
                   </button>,
                 )}
+                <InventoryDashboard needs={stockNeeds} />
                 {searchBox}
                 {filtered(s.mealTypes, ["name"]).map((m) => (
                   <section className="card" key={m.id}>
@@ -1707,9 +1718,7 @@ export default function App() {
                         {m.currentStock <= 0 ? "نافد" : m.currentStock <= m.minThreshold ? "منخفض" : "متوفر"}
                       </span>
                     </div>
-                    <div className="big-number">
-                      {displayQuantity(m.currentStock)} <small>{m.unit}</small>
-                    </div>
+                    <InventoryItemNeeds item={stockNeeds.items.find(i => i.id === m.id)!} end={stockNeeds.end} />
                     <p className="muted">
                       حد التنبيه {displayQuantity(m.minThreshold)} · سعر وحدة الشراء{" "}
                       {displayPrice(m.pricePerUnit)} ر.س

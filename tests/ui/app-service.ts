@@ -86,6 +86,18 @@ s.expenses = [
     chargedTo: "stable",
   },
 ];
+if (new URLSearchParams(location.search).get("scenario") === "inventory-plan") {
+  s.mealTypes = [
+    {id:"rhodes",name:"الرودس",unit:"ربطة",currentStock:10,pricePerUnit:30,minThreshold:2},
+    {id:"feed",name:"المركزات",unit:"كيس 40 كجم",currentStock:4.75,pricePerUnit:80,minThreshold:1},
+    {id:"extra",name:"صنف إضافي",unit:"كجم",currentStock:5,pricePerUnit:18,minThreshold:1},
+  ];
+  s.horses = Array.from({length:8},(_,i)=>({id:`h${i}`,name:`خيل تجريبي ${i+1}`,status:"private",entryDate:"2026-09-01",feeding:[
+    {mealTypeId:"rhodes",quantity:.2,frequency:"daily"},
+    {mealTypeId:"feed",quantity:2,frequency:"daily"},
+    {mealTypeId:"extra",quantity:.5,frequency:"monthly",timesPerMonth:2,schedule:[{weekday:2,ordinal:3},{weekday:0,ordinal:4}]},
+  ]}));
+}
 if (
   new URLSearchParams(location.search).get("scenario") === "closed-expenses"
 ) {

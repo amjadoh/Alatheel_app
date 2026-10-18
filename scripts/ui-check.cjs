@@ -107,7 +107,7 @@ async function main() {
             layout.closeSize >= 44,
         );
         assert.deepEqual(layout.headings, [
-          "حسابك · أعلى اليسار",
+          "المخزون · الشريط السفلي",
         ]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),
@@ -551,6 +551,42 @@ async function main() {
     await page.getByRole("button",{name:/حساب مدير تجريبي/}).waitFor();
     await context.close();
   });
+  for (const width of [320,390,430]) {
+    await check(`Inventory planning, fractions, kg conversion, purchase and day-27 rollover at ${width}px`,async()=>{
+      const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true});
+      await context.route("**/*",r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
+      const page=await context.newPage();page.on("pageerror",e=>report.errors.push(e.message));
+      await page.clock.install({time:new Date("2026-10-18T04:00:00Z")});
+      await page.goto(base+"/tests/ui/app.html?scenario=inventory-plan");
+      await page.getByRole("dialog").getByRole("button",{name:"إغلاق",exact:true}).click();
+      await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"المخزون",exact:true}).click();
+      const clean=t=>t.replace(/[\u2066-\u2069]/g,"");
+      const dashboard=page.getByRole("region",{name:"ملخص احتياج المخزون"});
+      await dashboard.waitFor();
+      assert.match(clean(await dashboard.textContent()),/234\.00/);
+      const card=name=>page.locator("section.card").filter({has:page.getByRole("heading",{name,exact:true})});
+      const rhodes=card("الرودس"), extra=card("صنف إضافي");
+      assert.match(clean(await rhodes.locator(".inventory-shortage").textContent()),/6 ربطة/);
+      assert.match(clean(await card("المركزات").locator(".inventory-quantities").textContent()),/190 كجم/);
+      assert.match(clean(await extra.locator(".inventory-quantities").textContent()),/8 كجم/);
+      await rhodes.locator("summary").click();
+      assert.equal(await rhodes.locator(".inventory-horse").count(),8);
+      assert.match(clean(await rhodes.locator(".inventory-horse").first().textContent()),/2 ربطة/);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      const noOverflow=await rhodes.evaluate(e=>e.scrollWidth<=e.clientWidth+1);assert.ok(noOverflow);
+      await page.screenshot({path:path.join(output,`inventory-${width}.png`),fullPage:true});
+      await rhodes.getByRole("button",{name:"شراء وإضافة",exact:true}).click();
+      const form=page.getByRole("dialog");await form.getByLabel(/الكمية المشتراة/).fill("6");await form.getByLabel(/إجمالي المبلغ المدفوع/).fill("180");
+      await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();await form.waitFor({state:"detached"});
+      const s=await snapshot(page);assert.equal(s.mealTypes[0].currentStock,16);assert.equal(s.expensePayments.length,1);assert.equal(s.expensePayments[0].amount,180);
+      assert.match(clean(await rhodes.locator(".inventory-shortage").textContent()),/0 ربطة/);
+      await page.clock.setSystemTime(new Date("2026-10-27T04:00:00Z"));await page.clock.runFor(31000);
+      assert.match(clean(await dashboard.textContent()),/27\/10\/2026 — 27\/10\/2026/);
+      await page.clock.setSystemTime(new Date("2026-10-28T04:00:00Z"));await page.clock.runFor(31000);
+      assert.match(clean(await dashboard.textContent()),/28\/10\/2026 — 27\/11\/2026/);
+      await context.close();
+    });
+  }
   assert.deepEqual(report.errors, []);
 }
 main()

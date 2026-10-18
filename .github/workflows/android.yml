@@ -22,7 +22,7 @@ jobs:
               os.environ['ANDROID_QA_API'] = api
               exec(compile(code, 'upgrade-generator', 'exec'), {})
               generated = Path('android-upgrade-generated.sh').read_text(encoding='utf-8')
-              assert 'apk/app-release.apk 1.8.3' in generated
+              assert 'apk/app-release.apk 1.9.0' in generated
               assert generated.count('adb shell am force-stop com.alatheel.stable') == 1
               assert ("grep -Eq 'Google|" in generated) == (api == '35')
               print('PASS Android upgrade script generation: ' + api)
