@@ -69,5 +69,5 @@ test("boarding horse retains expected income and owner balance in its financial 
     }),
   );
   assert.match(html, /متبقي حتى نهاية الشهر/);
-  assert.match(html, /إيواء شهري متوقع/);
+  assert.match(html, /رسوم الإيواء المتوقعة/);
 });

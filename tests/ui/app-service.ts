@@ -5,6 +5,9 @@ import {
   type State,
   type Actor,
 } from "../../functions/src/domain";
+import { accountRevision } from "../../functions/src/accounts";
+import { horseFinance } from "../../functions/src/finance";
+import { businessDay } from "../../functions/src/dates";
 export { staff, bill, money, nextMonth } from "../../functions/src/domain";
 export type {
   Actor,
@@ -125,7 +128,46 @@ if (
     "2026-10-16T12:00:00Z",
   );
 }
-let emit: (s: State, a: Actor | null, error?: string, phase?: import("../../src/auth-recovery").AuthPhase) => void = () => {};
+if (new URLSearchParams(location.search).get("scenario") === "follow-up") {
+  // Real command-generated receipts and payments, isolated in memory. The test
+  // freezes the browser at 2026-10-21; no production service is involved.
+  s = emptyState();
+  s.settings = [{id:"main", stableName:"الأثيل · فحص المتابعة"}];
+  s.users = [{id:a.uid, displayName:a.displayName, email:"qa@example.test", role:"admin"}];
+  s.owners = [{id:"owner", displayName:"مالك تجريبي"}];
+  s.mealTypes = [{id:"rhodes", name:"الرودس", unit:"ربطة", feedingUnit:"ربطة", feedingUnitsPerPurchaseUnit:1, pricePerUnit:30, currentStock:0, minThreshold:1}];
+  const common = {ownerId:"owner", ownerName:"مالك تجريبي", status:"boarding", entryDate:"2026-10-01", feeding:[{mealTypeId:"rhodes",quantity:.2,frequency:"daily"}]};
+  s.horses = [
+    {id:"overdue",name:"خيل دفعة جزئية",...common,boardingFee:1000,dueDate:"2026-10-20"},
+    {id:"due-today",name:"خيل استحقاق اليوم",...common,boardingFee:800,dueDate:"2026-10-21"},
+    {id:"prepaid",name:"خيل دفع مقدم",...common,boardingFee:600,dueDate:"2026-10-26"},
+    {id:"private",name:"خيل ملك خاص بلا تغذية",ownerId:"qa",ownerName:"الإسطبل",status:"private",entryDate:"2026-10-01",boardingFee:0,feeding:[]},
+  ];
+  s.registrationRequests = [{id:"request",horseName:"طلب تجريبي",status:"pending",ownerId:"owner",createdAt:"2026-10-21T09:00:00Z"}];
+  const now = "2026-10-21T12:00:00Z";
+  let request = 0;
+  const command = (action:string,id:string|undefined,data:Record<string,any>) => {
+    s = applyCommand(s,a,{action,id,data,requestId:`follow_up_fixture_${++request}`},now);
+  };
+  command("expense.save",undefined,{name:"راتب العامل",cost:1800,frequency:"monthly",startMonth:"2026-10",expenseKind:"operating",expenseCategory:"salary",allocationScope:"all_active",chargedTo:"stable",horseIds:[]});
+  const salaryId = s.expenses.at(-1)!.id;
+  command("expense.save",undefined,{name:"زيارة الطبيب",cost:300,frequency:"once",incurredAt:"2026-10-21",expenseKind:"operating",expenseCategory:"other",allocationScope:"selected",chargedTo:"owner",horseIds:["overdue"]});
+  const vetId = s.expenses.at(-1)!.id;
+  command("stock.purchase","rhodes",{amount:7,total:210,paidAt:"2026-10-21",method:"bank"});
+  command("stock.move","rhodes",{type:"remove",amount:5.6,reason:"استهلاك سابق تجريبي موثق"});
+  command("expense.pay",salaryId,{amount:600,period:"2026-10",paidAt:"2026-10-21",expectedRemaining:1800});
+  command("expense.pay",vetId,{amount:100,period:"2026-10",paidAt:"2026-10-21",expectedRemaining:300});
+  for(const [horseId,amount] of [["overdue",250],["prepaid",1000]] as const) {
+    command("income.pay",horseId,{amount,paymentType:"partial",paidAt:"2026-10-21",method:"bank",periods:[],expectedRevision:accountRevision(s,s.horses.find(h=>h.id===horseId)!)});
+  }
+  if(new URLSearchParams(location.search).get("incomplete") === "1") {
+    // Historical recurring bill with no saved September basis: the UI must
+    // label its cash forecast as incomplete even when the card is collapsed.
+    s.expenses.find(expense=>expense.id===salaryId)!.startMonth="2026-09";
+  }
+}
+type StartupProgress = { stage: "session" | "access" | "data" | "maintenance" | "ready"; completed: number; total: number };
+let emit: (s: State, a: Actor | null, error?: string, phase?: import("../../src/auth-recovery").AuthPhase, progress?: StartupProgress) => void = () => {};
 export function retryLoginSession() { emit(s,a,undefined,"ready"); }
 if(new URLSearchParams(location.search).get("scenario")==="owner-alerts"){
   a.uid="owner";a.ownerRecordId="owner";a.role="owner";a.displayName="مالك تجريبي";
@@ -136,6 +178,49 @@ export const inspectQA = () => structuredClone(s);
 export function connect(fn: typeof emit) {
   emit = fn;
   const scenario=new URLSearchParams(location.search).get("scenario");
+  if(scenario === "startup") {
+    const params = new URLSearchParams(location.search);
+    const qa = (window as any).__startupQA;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const after = (parameter: string, fallback: number, work: () => void) => {
+      const requested = Number(params.get(parameter) ?? fallback);
+      timers.push(setTimeout(work, Math.max(0, Number.isFinite(requested) ? requested : fallback)));
+    };
+    const mark = (name: string) => { if(qa) qa.timings[name] = performance.now(); };
+    if (params.get("earlyHorse") === "1") {
+      (window as any).__startupExpectedHorseFinance = () => horseFinance(s, s.horses[0], businessDay(new Date().toISOString()).slice(0, 7));
+      (window as any).__startupChangePrice = () => {
+        s = { ...s, mealTypes: s.mealTypes.map(meal => ({ ...meal, pricePerUnit: Number(meal.pricePerUnit) * 2 })) };
+        fn(s, { ...a, dataReady: true }, undefined, "ready", { stage: "ready", completed: 5, total: 5 });
+      };
+    }
+    mark("serviceStarted");
+    fn(emptyState(), null, undefined, "restoring", {stage:"session", completed:0, total:5});
+    after("authDelay", 120, () => {
+      const failure = params.get("authFailure");
+      if(failure === "waiting" || failure === "blocked") {
+        mark("authFailure");
+        fn(emptyState(), null, failure === "waiting" ? "تعذر الاتصال التجريبي" : "تعذر التحقق من صلاحية الحساب التجريبي", failure, {stage:"access", completed:1, total:5});
+        return;
+      }
+      mark("authReady");
+      if (params.get("earlyHorse") === "1") {
+        mark("earlyHorse");
+        fn({ ...emptyState(), horses: s.horses }, { ...a, dataReady: false }, undefined, "ready", { stage: "data", completed: 2, total: 5 });
+      } else fn(emptyState(), {...a, dataReady:false}, undefined, "ready", {stage:"data", completed:2, total:5});
+    });
+    if(!params.get("authFailure")) {
+      after("dataDelay", 280, () => {
+        mark("dataArrived");
+        fn(s, {...a, dataReady:false}, undefined, "ready", {stage:"maintenance", completed:4, total:5});
+      });
+      after("readyDelay", 420, () => {
+        mark("financialReady");
+        fn(s, {...a, dataReady:true}, undefined, "ready", {stage:"ready", completed:5, total:5});
+      });
+    }
+    return () => { timers.forEach(clearTimeout); emit = () => {}; };
+  }
   if(scenario==="restoring-session"||scenario==="waiting-session"){
     fn(emptyState(),null,scenario==="waiting-session"?"تعذر الاتصال التجريبي":undefined,scenario==="waiting-session"?"waiting":"restoring");
     return ()=>{emit=()=>{};};
@@ -150,7 +235,7 @@ export async function execute(c: any) {
     s,
     a,
     { ...c, requestId: c.requestId || crypto.randomUUID() },
-    new URLSearchParams(location.search).get("scenario") === "inventory-plan"
+    ["inventory-plan","follow-up"].includes(new URLSearchParams(location.search).get("scenario") || "")
       ? new Date().toISOString() : "2026-10-16T12:00:00Z",
   );
   emit(s, a);

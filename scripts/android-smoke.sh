@@ -85,5 +85,5 @@ if grep -Fq 'Process: com.alatheel.stable' android-qa/crash.txt; then cat androi
 grep -Fq 'com.alatheel.stable' android-qa/window.xml
 if grep -Fq 'تعذر التحقق' android-qa/window.xml; then cat android-qa/dns-check.txt android-qa/ip-check.txt android-qa/host-dns.txt; grep -E -A 8 'AlatheelUpdater|UnknownHost|DnsResolver|SSL|Network is unreachable' android-qa/app-log.txt || true; exit 1; fi
 test "$READY" = true
+if test "${ANDROID_QA_API:-35}" = 35; then bash scripts/android-startup-timing.sh; fi
 printf 'Signed APK installed and reached the Google sign-in screen without an Android crash. Authentication was not attempted.\n' > android-qa/result.txt
-

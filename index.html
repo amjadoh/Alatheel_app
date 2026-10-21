@@ -9,10 +9,27 @@
     <meta name="theme-color" content="#171916" />
     <link rel="icon" href="/icons/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preload" as="image" href="/logo.jpeg" />
+    <style>
+      html,body{margin:0;background:#f5f1e7}
+      #initial-opening{min-height:100dvh;display:grid;place-items:center;background:#f5f1e7;color:#171916;font-family:Tahoma,sans-serif}
+      #initial-opening section{display:flex;flex-direction:column;align-items:center;padding:24px;text-align:center}
+      #initial-opening img{width:132px;height:132px;border-radius:28px}
+      #initial-opening h1{font-size:24px;line-height:1.65;margin:22px 0 0}
+      #initial-opening .initial-name{font:400 10px/1.5 Arial,sans-serif;letter-spacing:3.2px;color:#706f64;margin:2px 0 32px}
+      #initial-opening .initial-track{width:188px;height:5px;border-radius:8px;background:#e6dfcd;overflow:hidden}
+      #initial-opening .initial-track span{display:block;width:10%;height:100%;background:#b29742;border-radius:8px}
+      #initial-opening .initial-caption{font-size:12px;line-height:1.8;color:#706f64;margin:14px 0 0}
+    </style>
     <title>الأثيل | إدارة الإسطبل</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><main id="initial-opening" dir="rtl" aria-label="فتح الأثيل"><section>
+      <img src="/logo.jpeg" alt="شعار إسطبل الأثيل" width="132" height="132" />
+      <h1>إسطبل الأثيل</h1><p class="initial-name" lang="en" dir="ltr">AL ATHEEL STUD</p>
+      <div class="initial-track" role="progressbar" aria-label="تقدم فتح الأثيل" aria-valuemin="0" aria-valuemax="100" aria-valuenow="10"><span></span></div>
+      <p class="initial-caption">جارٍ فتح الأثيل…</p>
+    </section></main></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -14,6 +14,7 @@ import {
 import { App as NativeApp } from "@capacitor/app";
 import { Download, RefreshCw } from "lucide-react";
 import { RELEASE_VERSION } from "./release-notes";
+import { retainRequiredUpdate, shouldCheckUpdate, UpdateCheckReason } from "./update-check-policy";
 
 type Release = {
   available: boolean;
@@ -36,6 +37,9 @@ const UpdateContext = createContext({
   check: () => {},
   busy: false,
   message: "",
+  checking: false,
+  verified: true,
+  blocked: false,
 });
 export const useAppUpdate = () => useContext(UpdateContext);
 
@@ -64,6 +68,7 @@ export function UpdateGate({
   android?: boolean;
 }) {
   const [checking, setChecking] = useState(android);
+  const [verified, setVerified] = useState(!android);
   const [release, setRelease] = useState<Release | null>(null);
   const [failedCheck, setFailedCheck] = useState(false);
   const [working, setWorking] = useState(false);
@@ -73,26 +78,48 @@ export function UpdateGate({
   const [instruction, setInstruction] = useState("");
   const locked = useRef(false);
   const mounted = useRef(true);
-  const check = async (manual = false) => {
-    if (!android || locked.current) return;
+  const lastSuccessAt = useRef<number | null>(null);
+  const previousCheckFailed = useRef(false);
+  const knownRelease = useRef<Release | null>(null);
+  const pendingForcedCheck = useRef(false);
+  const check = async (reason: UpdateCheckReason = "startup") => {
+    if (!android) return;
+    if (locked.current) {
+      // An update notification can arrive while a check/download is running.
+      // Coalesce these requests and verify once the current operation finishes.
+      if (reason === "manual") pendingForcedCheck.current = true;
+      return;
+    }
+    if (!shouldCheckUpdate(reason, lastSuccessAt.current, Date.now(), previousCheckFailed.current)) return;
     locked.current = true;
     setChecking(true);
     setError("");
+    setMessage("");
     try {
-      const result = await client.check();
+      const incoming = await client.check();
       if (!mounted.current) return;
+      const result = retainRequiredUpdate(knownRelease.current, incoming);
+      knownRelease.current = result;
+      lastSuccessAt.current = Date.now();
+      previousCheckFailed.current = false;
       setRelease(result);
       setFailedCheck(false);
-      if (manual && !result.available)
+      setVerified(true);
+      if (reason === "manual" && !result.available)
         setMessage("تستخدم أحدث إصدار من التطبيق");
     } catch (e) {
       if (mounted.current) {
+        previousCheckFailed.current = true;
         setFailedCheck(true);
         setError((e as Error).message || "تعذر التحقق من التحديث");
       }
     } finally {
       locked.current = false;
       if (mounted.current) setChecking(false);
+      if (mounted.current && pendingForcedCheck.current) {
+        pendingForcedCheck.current = false;
+        void check("manual");
+      }
     }
   };
   useEffect(() => {
@@ -103,7 +130,7 @@ export function UpdateGate({
       if (mounted.current) setPercent(percent);
     });
     const resume = NativeApp.addListener("appStateChange", ({ isActive }) => {
-      if (isActive) void check();
+      if (isActive) void check("resume");
     });
     return () => {
       mounted.current = false;
@@ -120,7 +147,8 @@ export function UpdateGate({
       if (!release.ready) {
         setPercent(0);
         await client.download();
-        setRelease({ ...release, ready: true });
+        knownRelease.current = { ...release, ready: true };
+        setRelease(knownRelease.current);
       }
       const result = await client.install();
       setInstruction(
@@ -130,25 +158,34 @@ export function UpdateGate({
       );
     } catch (e) {
       setError((e as Error).message || "تعذر تحديث التطبيق. أعد المحاولة.");
-      setRelease({ ...release, ready: false });
+      knownRelease.current = { ...release, ready: false };
+      setRelease(knownRelease.current);
     } finally {
       locked.current = false;
       setWorking(false);
+      if (mounted.current && pendingForcedCheck.current) {
+        pendingForcedCheck.current = false;
+        void check("manual");
+      }
     }
   };
-  const blocked = android && (checking || failedCheck || release?.available);
+  const panelBlocked = android && (failedCheck || !!release?.available);
+  const blocked = android && (checking || panelBlocked);
   return (
     <UpdateContext.Provider
       value={{
-        check: () => void check(true),
+        check: () => void check("manual"),
         busy: checking || working,
         message,
+        checking,
+        verified,
+        blocked,
       }}
     >
-      <div hidden={!!blocked} inert={blocked ? true : undefined}>
+      <div hidden={panelBlocked} inert={panelBlocked ? true : undefined}>
         {children}
       </div>
-      {blocked && (
+      {panelBlocked && (
         <div className="update-screen" dir="rtl" role="main">
           <section className="card update-panel" aria-labelledby="update-title">
             <img src="/logo.jpeg" alt="شعار الأثيل" className="update-logo" />
@@ -187,7 +224,7 @@ export function UpdateGate({
                 {failedCheck ? (
                   <button
                     className="button gold"
-                    onClick={() => void check(true)}
+                    onClick={() => void check("manual")}
                   >
                     <RefreshCw size={18} /> إعادة المحاولة
                   </button>

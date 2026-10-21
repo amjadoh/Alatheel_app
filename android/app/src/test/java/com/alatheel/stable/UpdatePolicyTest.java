@@ -4,6 +4,13 @@ import static org.junit.Assert.*;
 import org.junit.Test;
 
 public class UpdatePolicyTest {
+    @Test public void metadataHasShortPerStageAndTotalDeadlines() {
+        assertTrue(UpdatePolicy.METADATA_CONNECT_TIMEOUT_MS > 0);
+        assertTrue(UpdatePolicy.METADATA_READ_TIMEOUT_MS > 0);
+        assertTrue(UpdatePolicy.METADATA_TOTAL_TIMEOUT_MS <= 8000);
+        assertTrue(UpdatePolicy.METADATA_TOTAL_TIMEOUT_MS >=
+            UpdatePolicy.METADATA_CONNECT_TIMEOUT_MS + UpdatePolicy.METADATA_READ_TIMEOUT_MS);
+    }
     private static final String URL = "https://alatheel-app-426403695200.web.app/downloads/Alatheel-1.4.0.apk";
     private static final String SHA = "a".repeat(64);
     private boolean valid(String url, String sha, long size) {

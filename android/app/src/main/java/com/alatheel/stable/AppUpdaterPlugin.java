@@ -20,7 +20,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
 
 /** Sideloaded Android updates. Only our HTTPS host, package and release signer are accepted. */
@@ -29,19 +33,25 @@ public class AppUpdaterPlugin extends Plugin {
     private static final String HOST = "https://alatheel-app-426403695200.web.app";
     private static final String CERT = "2f508f35d389af0260d7d216fb750e2e49ecaeb4e4ffe5a9f928b1f7a7d6f83f";
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean downloading = new AtomicBoolean(false);
     private volatile JSONObject release;
 
     private File apk() { return new File(getContext().getCacheDir(), "alatheel-update.apk"); }
     private File metadata() { return new File(getContext().getCacheDir(), "alatheel-update.json"); }
     private HttpURLConnection open(String address) throws Exception {
+        return open(address, 15000, 30000, null);
+    }
+    private HttpURLConnection open(String address, int connectTimeout, int readTimeout,
+            AtomicReference<HttpURLConnection> connection) throws Exception {
         URL url = new URL(address);
         if (!url.getProtocol().equals("https") || !url.getHost().equals("alatheel-app-426403695200.web.app")
                 || url.getPort() != -1 || url.getUserInfo() != null) throw new IOException("Invalid update host");
         HttpURLConnection c = (HttpURLConnection) url.openConnection();
+        if (connection != null) connection.set(c);
         c.setInstanceFollowRedirects(false);
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(30000);
+        c.setConnectTimeout(connectTimeout);
+        c.setReadTimeout(readTimeout);
         c.setUseCaches(false);
         if (c.getResponseCode() != 200) { c.disconnect(); throw new IOException("Update unavailable"); }
         return c;
@@ -90,10 +100,22 @@ public class AppUpdaterPlugin extends Plugin {
 
     @PluginMethod
     public void check(PluginCall call) {
+        android.util.Log.i("AlatheelUpdater", "Metadata check requested");
+        // The small metadata request must not borrow APK download timeouts.
+        // A total deadline also bounds DNS/TLS stalls and slowly trickled bytes.
+        AtomicBoolean settled = new AtomicBoolean(false);
+        AtomicReference<HttpURLConnection> connection = new AtomicReference<>();
+        ScheduledFuture<?> deadline = deadlines.schedule(() -> {
+            if (!settled.compareAndSet(false, true)) return;
+            call.reject("تعذر التحقق من التحديث. تحقق من الإنترنت وأعد المحاولة.");
+            HttpURLConnection current = connection.get();
+            if (current != null) current.disconnect();
+        }, UpdatePolicy.METADATA_TOTAL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         worker.execute(() -> {
-            HttpURLConnection c = null;
             try {
-                c = open(HOST + "/latest.json");
+                if (settled.get()) return;
+                HttpURLConnection c = open(HOST + "/latest.json", UpdatePolicy.METADATA_CONNECT_TIMEOUT_MS,
+                        UpdatePolicy.METADATA_READ_TIMEOUT_MS, connection);
                 ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                 try (InputStream in = c.getInputStream()) {
                     byte[] bytes = new byte[4096]; int n;
@@ -103,19 +125,35 @@ public class AppUpdaterPlugin extends Plugin {
                     }
                 }
                 JSONObject next = valid(new JSONObject(buffer.toString("UTF-8")));
-                release = next;
+                if (release != null && next.getInt("versionCode") < release.getInt("versionCode"))
+                    throw new IOException("Outdated update metadata");
                 JSObject result = new JSObject();
                 result.put("available", next.getInt("versionCode") > installed());
                 result.put("versionName", next.getString("versionName"));
                 result.put("notes", next.optString("notes", "تحسينات وإصلاحات للتطبيق"));
                 result.put("ready", next.getInt("versionCode") > installed() && ready(next));
-                call.resolve(result);
+                if (settled.compareAndSet(false, true)) {
+                    release = next;
+                    call.resolve(result);
+                }
             } catch (Exception e) {
                 android.util.Log.w("AlatheelUpdater", "Public update metadata check failed", e);
-                call.reject("تعذر التحقق من التحديث. تحقق من الإنترنت وأعد المحاولة.");
+                if (settled.compareAndSet(false, true))
+                    call.reject("تعذر التحقق من التحديث. تحقق من الإنترنت وأعد المحاولة.");
             }
-            finally { if (c != null) c.disconnect(); }
+            finally {
+                deadline.cancel(false);
+                HttpURLConnection current = connection.get();
+                if (current != null) current.disconnect();
+            }
         });
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        deadlines.shutdownNow();
+        worker.shutdownNow();
+        super.handleOnDestroy();
     }
 
     @PluginMethod
@@ -191,4 +229,3 @@ public class AppUpdaterPlugin extends Plugin {
         });
     }
 }
-

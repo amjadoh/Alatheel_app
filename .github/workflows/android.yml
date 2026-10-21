@@ -14,7 +14,7 @@ jobs:
       - name: Validate upgrade test generation before building
         run: |
           python3 - <<'PY'
-          import os
+          import os, json
           from pathlib import Path
           source = Path('scripts/android-upgrade-check.sh').read_text(encoding='utf-8')
           code = source.split("python3 - <<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
@@ -22,7 +22,7 @@ jobs:
               os.environ['ANDROID_QA_API'] = api
               exec(compile(code, 'upgrade-generator', 'exec'), {})
               generated = Path('android-upgrade-generated.sh').read_text(encoding='utf-8')
-              assert 'apk/app-release.apk 1.9.0' in generated
+              assert 'apk/app-release.apk ' + json.loads(Path('package.json').read_text())['version'] in generated
               assert generated.count('adb shell am force-stop com.alatheel.stable') == 1
               assert ("grep -Eq 'Google|" in generated) == (api == '35')
               print('PASS Android upgrade script generation: ' + api)
@@ -49,6 +49,14 @@ jobs:
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
         run: node scripts/auth-continuity-check.cjs
+      - name: Verify startup timing and access gates with isolated delayed data
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/startup-check.cjs
+      - name: Verify operational follow-up and financial projections without production records
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/follow-up-check.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -138,7 +146,9 @@ jobs:
           mkdir -p previous
           gh release download v1.7.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.7.0.apk -D previous
           gh release download v1.8.1 -R "$GITHUB_REPOSITORY" -p Alatheel-1.8.1.apk -D previous
+          gh release download v1.9.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.9.0.apk -D previous
           printf '%s\n' '7a4704da10119300389b39fc0526810c87f9831b1eb2dd828c2a8d01a9bc33e8  previous/Alatheel-1.7.0.apk' 'cd0c43f410502c52fe3f0b69a06c0e0f36e12c5953fd9ef36cd9a29bae2e5753  previous/Alatheel-1.8.1.apk' | sha256sum --check
+          printf '%s\n' 'a1bb17e5d621e8729b6bd4ccd4c02907037e5bf78a220a455b8b083d514f8fca  previous/Alatheel-1.9.0.apk' | sha256sum --check
       - name: Verify upgrade, cold startup and outdated WebView recovery
         shell: bash
         env:

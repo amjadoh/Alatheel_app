@@ -107,7 +107,7 @@ async function main() {
             layout.closeSize >= 44,
         );
         assert.deepEqual(layout.headings, [
-          "المخزون · الشريط السفلي",
+          "فتح التطبيق والحساب", "الرئيسية", "المخزون",
         ]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),
@@ -537,7 +537,7 @@ async function main() {
   await check("Restoring a saved session never offers Google sign-in",async()=>{
     const context=await browser.newContext({viewport:{width:320,height:844},isMobile:true});const page=await context.newPage();
     await page.goto(base+"/tests/ui/app.html?scenario=restoring-session");
-    await page.getByRole("heading",{name:"جارٍ استعادة حسابك…"}).waitFor();
+    await page.getByRole("progressbar",{name:"تقدم فتح الأثيل"}).waitFor();
     assert.equal(await page.getByRole("button",{name:"دخول الأعضاء"}).count(),0);
     assert.equal(await page.getByRole("navigation",{name:"التنقل الرئيسي"}).count(),0);
     await page.screenshot({path:path.join(output,"restoring-session.png")});await context.close();
@@ -545,7 +545,7 @@ async function main() {
   await check("Interrupted session verification recovers without another Google sign-in",async()=>{
     const context=await browser.newContext({viewport:{width:320,height:844},isMobile:true});const page=await context.newPage();
     await page.goto(base+"/tests/ui/app.html?scenario=waiting-session");
-    await page.getByText("ننتظر الاتصال للتحقق من جلستك المحفوظة.",{exact:true}).waitFor();
+    await page.getByRole("button",{name:"إعادة المحاولة",exact:true}).waitFor();
     assert.equal(await page.getByRole("button",{name:"دخول الأعضاء"}).count(),0);
     await page.getByRole("button",{name:"إعادة المحاولة",exact:true}).click();
     await page.getByRole("button",{name:/حساب مدير تجريبي/}).waitFor();

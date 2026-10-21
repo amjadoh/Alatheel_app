@@ -1,4 +1,5 @@
 import type { InventoryNeeds, ItemNeeds } from "../functions/src/inventory-needs";
+import type { ItemRunway } from "../functions/src/inventory-runway";
 import { displayAmount, displayDate, displayNumber, displayQuantity } from "./format";
 
 export function InventoryDashboard({ needs }: { needs: InventoryNeeds }) {
@@ -7,6 +8,19 @@ export function InventoryDashboard({ needs }: { needs: InventoryNeeds }) {
     <div className="inventory-metrics"><div><span>أصناف تحتاج شراء</span><strong>{displayNumber(needs.needCount)} <small>من أصل {displayNumber(needs.items.length)}</small></strong></div><div><span>الشراء المتوقع</span><strong>{displayAmount(needs.cost)} <small>ر.س</small></strong>{(needs.missingPrices || needs.incomplete) && <small>تقدير غير مكتمل</small>}</div></div>
     {needs.incomplete && <p className="notice">بعض برامج التغذية تحتاج تحديد المواعيد؛ الاحتياج المعروض يشمل الوجبات المجدولة فقط.</p>}
     {needs.missingPrices && <p className="notice">أكمل سعر الأصناف الناقصة لحساب قيمة الشراء المتوقعة.</p>}
+  </section>;
+}
+
+export function InventoryRunwayPanel({ item, today, horizonEnd }: { item: ItemRunway; today: string; horizonEnd: string }) {
+  return <section className={`inventory-runway ${item.status === "shortage" ? "short" : ""}`} aria-label="توقع توفير الصنف">
+    <h3>متى تحتاج توفره؟</h3>
+    {item.incomplete ? <p className="notice small">{item.needsStockData ? "راجع كمية المخزون لتحديد موعد توفيره." : item.pendingIncomplete ? "أكمل مزامنة الاستهلاك السابق لتحديد الموعد." : item.needsUnitData ? "أكمل تحويل وحدة الصنف لتحديد الموعد بدقة." : item.needsQuantityData ? "أكمل كميات التغذية لتحديد الموعد بدقة." : "أكمل مواعيد التغذية لتحديد الموعد بدقة."}</p>
+      : item.needsProvidingDate ? <>
+        <div><span>{item.needsProvidingDate <= today ? "تحتاج توفره اليوم" : "تحتاج توفره في"}</span><strong>{displayDate(item.needsProvidingDate)}</strong></div>
+        {item.lastCoveredDate && item.lastCoveredDate >= today && <p className="small muted">يكفي حتى نهاية {displayDate(item.lastCoveredDate)}.</p>}
+      </> : item.status === "no_consumption" ? <p className="small muted">لا يوجد استهلاك مجدول لهذا الصنف خلال الفترة المحسوبة.</p>
+      : <p>الكمية تغطي الوجبات المسجلة حتى {displayDate(horizonEnd)}.</p>}
+    <p className="small muted">تقدير حسب الكمية وبرامج التغذية الحالية؛ يتحدث عند الشراء أو تعديل الاستهلاك.</p>
   </section>;
 }
 

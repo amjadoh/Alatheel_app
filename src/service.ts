@@ -9,10 +9,10 @@ import {
 } from "firebase/auth";
 import {
   getFirestore,
-  getDoc,
   collection,
   doc,
   onSnapshot,
+  onSnapshotsInSync,
   query,
   where,
 } from "firebase/firestore";
@@ -23,6 +23,8 @@ import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import { assertSession,sessionExpiresAt } from "../functions/src/session-policy";
 import { createPersistentAuth } from "./persistent-auth";
 import { authFailureAction, type AuthPhase } from "./auth-recovery";
+import { createStartupDataGate, requiresStartupMaintenance, type StartupDataProgress } from "./startup-data";
+import { businessDay } from "../functions/src/dates";
 import { androidPush,StaffPush,pushDeviceId } from "./native-push";
 import project from "./firebase-project.json";
 import { storageCollection, normalizeRecord } from "../functions/src/records";
@@ -70,7 +72,8 @@ let state: State = emptyState(),
 let authError: string | undefined;
 let authPhase: AuthPhase = "restoring";
 let retryAuthentication = () => {};
-let emit: (s: State, a: Actor | null, error?: string, phase?: AuthPhase) => void = () => {};
+let startupProgress: StartupDataProgress = { stage: "session", completed: 0, total: 1 };
+let emit: (s: State, a: Actor | null, error?: string, phase?: AuthPhase, progress?: StartupDataProgress) => void = () => {};
 let subscriptions: (() => void)[] = [];
 const publish = (error?: string) =>
   emit(
@@ -80,6 +83,7 @@ const publish = (error?: string) =>
     actor,
     error,
     authPhase,
+    startupProgress,
   );
 const stop = () => {
   subscriptions.forEach((fn) => fn());
@@ -88,209 +92,221 @@ const stop = () => {
 export function connect(callback: typeof emit) {
   emit = callback;
   if (!auth || !db || !functions) {
-    authPhase="signed-out";
-    publish(
-      "خدمة تسجيل الدخول غير مهيأة. لا يمكن الدخول حتى اكتمال ربط Google.",
-    );
+    authPhase = "signed-out";
+    publish("خدمة تسجيل الدخول غير مهيأة. لا يمكن الدخول حتى اكتمال ربط Google.");
     return () => {};
   }
-  const publicUnsub = onSnapshot(doc(db, "settings", "main"), (snap) => {
+  let disposed = false, generation = 0, expiresAt = 0, retryCount = 0;
+  let dataGate: ReturnType<typeof createStartupDataGate> | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let sessionTimer: ReturnType<typeof setTimeout> | undefined;
+  const publicUnsub = onSnapshot(doc(db, "settings", "main"), snap => {
+    if (disposed) return;
     state.settings = snap.exists() ? [{ ...snap.data(), id: "main" }] : [];
-    publish();
+    publish(authError);
   });
-  let disposed=false,generation=0,expiresAt=0,retryCount=0;
-  let retryTimer:ReturnType<typeof setTimeout>|undefined,sessionTimer:ReturnType<typeof setTimeout>|undefined;
-  const authenticate = async (current:User|null) => {
-    const attempt=++generation;
-    const stale=()=>disposed||attempt!==generation||auth?.currentUser?.uid!==current?.uid;
-    expiresAt=0;
-    clearTimeout(retryTimer);clearTimeout(sessionTimer);
-    stop();
+  const authenticate = async (current: User | null) => {
+    const attempt = ++generation;
+    let failedAttempt = false;
+    const superseded = () => disposed || attempt !== generation || auth?.currentUser?.uid !== current?.uid;
+    const stale = () => failedAttempt || superseded();
+    expiresAt = 0;
+    clearTimeout(retryTimer); clearTimeout(sessionTimer);
+    stop(); dataGate = undefined;
     user = current;
     actor = null;
     state = emptyState();
+    startupProgress = { stage: "session", completed: 0, total: 1 };
     authPhase = current ? "restoring" : "signed-out";
     publish(authError);
     if (!current) return;
-    try {
-      await persistentAuth!.ready;
-      if(stale())return;
-      const token=await current.getIdTokenResult();
-      if(stale())return;
-      try{assertSession(token.claims.auth_time);}catch(e){throw Object.assign(e instanceof Error?e:new Error("انتهت الجلسة"),{code:"auth/session-expired"});}
-      expiresAt=sessionExpiresAt(token.claims.auth_time);
-      sessionTimer=setTimeout(()=>{if(!stale())expireSession();},Math.max(0,expiresAt-Date.now()));
-      await httpsCallable(functions!, "ensureProfile")({});
-      // Owners have no access to financial bases; staff rollover is server-authorized.
-      // Try after profile read below, before subscribing to the financial data.
-      const initialProfile = await getDoc(doc(db!, "users", current.uid));
-      if(stale())return;
-      if (["admin", "employee"].includes(initialProfile.data()?.role)) {
-        await httpsCallable(
-          functions!,
-          "operate",
-        )({ action: "finance.rollover", requestId: crypto.randomUUID() });
-      }
-      if(stale())return;
-      const pUnsub = onSnapshot(doc(db!, "users", current.uid), (snap) => {
-        if(stale())return;
-        const p = snap.data();
-        if (!p || p.disabled) {
-          stop();
-          actor = null;
-          authPhase = "signed-out";
-          publish("الحساب معطل أو غير متاح");
-          void signOut(auth!);
-          return;
-        }
-        const changed =
-          actor?.role !== p.role || actor?.ownerRecordId !== p.ownerRecordId;
-        actor = {
-          uid: current.uid,
-          displayName: p.displayName,
-          role: p.role,
-          disabled: p.disabled,
-          ownerRecordId: p.ownerRecordId,
-          photoURL: current.photoURL || "",
-        };
-        authPhase = "ready";
-        authError = undefined;
-        retryCount = 0;
-        if (changed) {
-          stop();
-          state = emptyState();
-          if (!staff(actor))
-            state.users = [normalizeRecord("users", current.uid, p)];
-          subscribeData();
-          subscriptions.push(
-            onSnapshot(doc(db!, "users", current.uid), (profile) => {
-              if(stale())return;
-              const u = profile.data();
-              if (
-                u?.disabled ||
-                u?.role !== actor?.role ||
-                u?.ownerRecordId !== actor?.ownerRecordId
-              ) {
-                void signOut(auth!);
-              } else if (u && actor) {
-                actor.displayName = u.displayName;
-                if (!staff(actor))
-                  state.users = [normalizeRecord("users", current.uid, u)];
-                publish();
-              }
-            }),
-          );
-        }
-        publish();
-      });
-      subscriptions.push(pUnsub);
-    } catch (e) {
-      if(stale())return;
-      authError = errorText(e);
-      stop();
-      const action=authFailureAction(e);
-      if(action!=="sign-out"){
-        authPhase=action==="block"?"blocked":"waiting";
+    const failAuthentication = async (error: unknown) => {
+      if (stale()) return;
+      failedAttempt = true;
+      authError = errorText(error);
+      stop(); dataGate = undefined;
+      actor = null;
+      state = emptyState();
+      const action = authFailureAction(error);
+      if (action !== "sign-out") {
+        authPhase = action === "block" ? "blocked" : "waiting";
         publish(authError);
-        if(action==="retry"){
-          const delay=Math.min(30000,5000*2**Math.min(retryCount++,3));
-          retryTimer=setTimeout(async()=>{
-            if(stale())return;
-            try{await current.getIdToken(true);}catch(refreshError){
-              if(stale())return;
-              if(authFailureAction(refreshError)==="sign-out"){await logout(false);return;}
+        if (action === "retry") {
+          const delay = Math.min(30000, 5000 * 2 ** Math.min(retryCount++, 3));
+          retryTimer = setTimeout(async () => {
+            if (superseded()) return;
+            try { await current.getIdToken(true); }
+            catch (refreshError) {
+              if (superseded()) return;
+              if (authFailureAction(refreshError) === "sign-out") { await logout(false); return; }
             }
-            if(!stale())void authenticate(current);
-          },delay);
+            if (!superseded()) void authenticate(current);
+          }, delay);
         }
         return;
       }
-      actor = null;
-      state = emptyState();
       authPhase = "signed-out";
-      if (Capacitor.isNativePlatform())
-        await FirebaseAuthentication.signOut().catch(() => {});
-      await signOut(auth!).catch(() => {});
       publish(authError);
-    }
+      if (Capacitor.isNativePlatform()) await FirebaseAuthentication.signOut().catch(() => {});
+      if (!superseded()) await signOut(auth!).catch(() => {});
+    };
+    try {
+      await persistentAuth!.ready;
+      if (stale()) return;
+      const token = await current.getIdTokenResult();
+      if (stale()) return;
+      try { assertSession(token.claims.auth_time); }
+      catch (e) { throw Object.assign(e instanceof Error ? e : new Error("انتهت الجلسة"), { code: "auth/session-expired" }); }
+      expiresAt = sessionExpiresAt(token.claims.auth_time);
+      sessionTimer = setTimeout(() => { if (!superseded()) expireSession(); }, Math.max(0, expiresAt - Date.now()));
+      startupProgress = { stage: "access", completed: 0, total: 1 };
+      publish(authError);
+      // A fresh server validation is required on launch; cache never grants access.
+      await httpsCallable(functions!, "ensureProfile")({});
+      if (stale()) return;
+      // A cached profile never approves access, but must not leave the opening
+      // screen waiting forever when the listener cannot reach the server.
+      const profileTimer = setTimeout(() => {
+        if (!stale()) void failAuthentication(Object.assign(
+          new Error("تعذر التحقق من صلاحيات الحساب. تحقق من اتصالك ثم أعد المحاولة"),
+          { code: "startup/profile-timeout" },
+        ));
+      }, 15000);
+      subscriptions.push(() => clearTimeout(profileTimer));
+      const pUnsub = onSnapshot(doc(db!, "users", current.uid), { includeMetadataChanges: true }, snap => {
+        if (stale()) return;
+        const authoritative = !snap.metadata.fromCache && !snap.metadata.hasPendingWrites;
+        if (!authoritative) {
+          if (actor) actor.dataReady = false;
+          dataGate?.snapshot("profile", false);
+          return;
+        }
+        clearTimeout(profileTimer);
+        const profile = snap.data();
+        if (!profile || profile.disabled || profile.deleted || profile.membershipApproved !== true) {
+          void failAuthentication(Object.assign(new Error("الحساب معطل أو غير متاح"), { code: "functions/permission-denied" }));
+          return;
+        }
+        if (actor && (actor.role !== profile.role || actor.ownerRecordId !== profile.ownerRecordId)) {
+          // Re-check a changed role without discarding the valid seven-day session.
+          void authenticate(current);
+          return;
+        }
+        if (actor) {
+          actor.displayName = profile.displayName;
+          if (!staff(actor)) state.users = [normalizeRecord("users", current.uid, profile)];
+          dataGate?.snapshot("profile", true);
+          return;
+        }
+        const a: Actor = {
+          uid: current.uid, displayName: profile.displayName, role: profile.role,
+          disabled: profile.disabled, ownerRecordId: profile.ownerRecordId,
+          photoURL: current.photoURL || "", dataReady: false,
+        };
+        actor = a;
+        authPhase = "ready";
+        authError = undefined;
+        retryCount = 0;
+        if (!staff(a)) state.users = [normalizeRecord("users", current.uid, profile)];
+        const watched = collections.filter(c => staff(a) || ![
+          "users", "owners", "mealTypes", "inventoryTransactions", "expenses",
+          "expensePayments", "financialReports", "financialPeriods",
+        ].includes(c));
+        let maintenanceRequestId: string | undefined;
+        dataGate = createStartupDataGate({
+          collections: ["profile", ...watched],
+          active: () => !stale() && actor === a,
+          needsMaintenance: () => staff(a) && requiresStartupMaintenance(state, businessDay(new Date().toISOString())),
+          maintain: () => {
+            maintenanceRequestId ||= crypto.randomUUID();
+            return httpsCallable(functions!, "operate")({ action: "finance.rollover", requestId: maintenanceRequestId });
+          },
+          progress: progress => {
+            if (stale() || actor !== a) return;
+            startupProgress = progress;
+            a.dataReady = progress.stage === "ready";
+            if (a.dataReady) {
+              authError = undefined; retryCount = 0; maintenanceRequestId = undefined;
+              clearTimeout(retryTimer);
+            }
+            publish(authError);
+          },
+          failed: error => {
+            if (stale() || actor !== a) return;
+            if (authFailureAction(error) !== "retry") { void failAuthentication(error); return; }
+            // Catch-up failure is not an authentication failure. Keep the verified
+            // identity while blocking balances and mutations until data is current.
+            authError = errorText(error); a.dataReady = false;
+            publish(authError);
+            clearTimeout(retryTimer);
+            // A clock mismatch or missing listener confirmation needs an explicit
+            // retry; repeatedly writing the same financial request cannot fix it.
+            if ((error as { code?: string }).code === "startup/snapshot-timeout") return;
+            retryTimer = setTimeout(() => {
+              if (!stale() && actor === a) dataGate?.retry();
+            }, Math.min(30000, 5000 * 2 ** Math.min(retryCount++, 3)));
+          },
+        });
+        const gate = dataGate;
+        subscriptions.push(() => gate.dispose());
+        gate.snapshot("profile", true);
+        for (const c of watched) {
+          const ref = collection(db!, storageCollection(c));
+          const q = ["horses", "registrationRequests", "income", "activities"].includes(c) && !staff(a)
+            ? query(ref, where("ownerId", "==", a.ownerRecordId || a.uid)) : ref;
+          subscriptions.push(onSnapshot(q, { includeMetadataChanges: true }, snapshot => {
+            if (stale() || actor !== a) return;
+            // Never publish a partly delivered transaction through another listener.
+            a.dataReady = false;
+            state[c] = snapshot.docs.map(d => normalizeRecord(c, d.id, d.data()));
+            gate.snapshot(c, !snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites);
+          }, error => { if (!stale() && actor === a) void failAuthentication(error); }));
+        }
+        subscriptions.push(onSnapshotsInSync(db!, () => {
+          if (!stale() && actor === a) gate.synchronize();
+        }));
+        startupProgress = { stage: "data", completed: 1, total: watched.length + 1 };
+        publish();
+      }, error => { if (!stale()) void failAuthentication(error); });
+      subscriptions.push(pUnsub);
+    } catch (error) { await failAuthentication(error); }
   };
-  function expireSession(){authError="انتهت مدة الدخول البالغة 7 أيام؛ سجل الدخول عبر Google مجددًا";actor=null;authPhase="signed-out";stop();publish(authError);void logout(false);}
-  function checkSession(){if(!disposed&&expiresAt&&Date.now()>=expiresAt)expireSession();}
-  const resume=()=>{checkSession();if(authPhase==="waiting")retryAuthentication();};
-  const visibility=()=>{if(document.visibilityState==="visible")resume();};
-  document.addEventListener("visibilitychange",visibility);
-  let removeResume:undefined|(()=>void);
-  if(Capacitor.isNativePlatform())void NativeApp.addListener("appStateChange",({isActive})=>{if(isActive)resume();}).then(h=>{if(disposed)void h.remove();else removeResume=()=>void h.remove();});
-  const unsub = onAuthStateChanged(auth, authenticate);
-  retryAuthentication=()=>{if(!disposed&&auth?.currentUser)void authenticate(auth.currentUser);};
-  const online=()=>{if(authPhase==="waiting")retryAuthentication();};
-  window.addEventListener("online",online);
-  return () => {
-    disposed=true;clearTimeout(retryTimer);clearTimeout(sessionTimer);
-    document.removeEventListener("visibilitychange",visibility);removeResume?.();
-    window.removeEventListener("online",online);retryAuthentication=()=>{};
-    stop();
-    unsub();
-    publicUnsub();
-  };
-}
-function subscribeData() {
-  if (!db || !actor) return;
-  const a = actor;
-  a.dataReady = false;
-  const received = new Set<string>();
-  const watched = collections.filter(
-    (c) =>
-      staff(a) ||
-      ![
-        "users",
-        "owners",
-        "mealTypes",
-        "inventoryTransactions",
-        "expenses",
-        "expensePayments",
-        "financialReports",
-        "financialPeriods",
-      ].includes(c),
-  );
-  for (const c of collections) {
-    if (c === "users" && !staff(a)) continue; // Own profile is already watched by document ID.
-    if (
-      !["admin", "employee"].includes(a.role) &&
-      [
-        "owners",
-        "mealTypes",
-        "inventoryTransactions",
-        "expenses",
-        "expensePayments",
-        "financialReports",
-        "financialPeriods",
-      ].includes(c)
-    )
-      continue;
-    const ref = collection(db, storageCollection(c));
-    const q =
-      c === "users" && !["admin", "employee"].includes(a.role)
-        ? query(ref, where("uid", "==", a.uid))
-        : ["horses", "registrationRequests", "income", "activities"].includes(
-              c,
-            ) && !["admin", "employee"].includes(a.role)
-          ? query(ref, where("ownerId", "==", a.ownerRecordId || a.uid))
-          : ref;
-    subscriptions.push(
-      onSnapshot(
-        q,
-        (snap) => {
-          state[c] = snap.docs.map((d) => normalizeRecord(c, d.id, d.data()));
-          received.add(c);
-          a.dataReady = watched.every((name) => received.has(name));
-          publish();
-        },
-        (e) => publish(errorText(e)),
-      ),
-    );
+  function expireSession() {
+    generation++; expiresAt = 0; clearTimeout(retryTimer); clearTimeout(sessionTimer);
+    authError = "انتهت مدة الدخول البالغة 7 أيام؛ سجل الدخول عبر Google مجددًا";
+    actor = null; authPhase = "signed-out"; stop(); publish(authError); void logout(false);
   }
+  function checkSession() { if (!disposed && expiresAt && Date.now() >= expiresAt) expireSession(); }
+  const resume = () => {
+    checkSession();
+    if (authPhase === "waiting") retryAuthentication();
+    else if (actor && authPhase === "ready") dataGate?.synchronize();
+  };
+  const visibility = () => { if (document.visibilityState === "visible") resume(); };
+  document.addEventListener("visibilitychange", visibility);
+  let removeResume: undefined | (() => void);
+  if (Capacitor.isNativePlatform()) void NativeApp.addListener("appStateChange", ({ isActive }) => {
+    if (isActive) resume();
+  }).then(h => { if (disposed) void h.remove(); else removeResume = () => void h.remove(); });
+  const unsub = onAuthStateChanged(auth, authenticate);
+  retryAuthentication = () => {
+    if (disposed || !auth?.currentUser) return;
+    checkSession();
+    if (actor && authPhase === "ready" && dataGate) dataGate.retry();
+    else if (authPhase !== "signed-out") void authenticate(auth.currentUser);
+  };
+  const online = () => {
+    if (authPhase === "waiting" || actor && !actor.dataReady) retryAuthentication();
+  };
+  window.addEventListener("online", online);
+  return () => {
+    disposed = true; clearTimeout(retryTimer); clearTimeout(sessionTimer);
+    document.removeEventListener("visibilitychange", visibility); removeResume?.();
+    window.removeEventListener("online", online); retryAuthentication = () => {};
+    stop(); dataGate = undefined; unsub(); publicUnsub();
+  };
 }
+
 export function errorText(e: unknown) {
   return e instanceof Error
     ? e.message.replace(/^Firebase:\s*/, "")
@@ -326,6 +342,7 @@ export async function execute(
   c: Omit<Command, "requestId"> & { requestId?: string },
 ) {
   ensure(actor, "سجل الدخول أولًا");
+  ensure(authPhase === "ready" && actor.dataReady, "انتظر اكتمال تحديث بيانات الحساب قبل تنفيذ العملية");
   const retryKey = JSON.stringify([actor.uid, c.action, c.id, c.data]);
   const command = {
     ...c,
@@ -359,6 +376,7 @@ export async function member(
   data: Record<string, any> = {},
 ) {
   ensure(actor?.role === "admin", "إدارة الأعضاء للمدير فقط");
+  ensure(authPhase === "ready" && actor.dataReady, "انتظر اكتمال تحديث بيانات الحساب قبل تنفيذ العملية");
   ensure(functions, "الاتصال غير جاهز");
   await httpsCallable(functions, "manageMember")({ action, id, data });
 }

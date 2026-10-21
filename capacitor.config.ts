@@ -13,6 +13,6 @@ const config: CapacitorConfig = {
     FirebaseAuthentication: { skipNativeAuth: true, providers: ["google.com"] },
   },
   server: { errorPath: "webview-update.html" },
-  android: { backgroundColor: "#171916", minWebViewVersion: 108 },
+  android: { backgroundColor: "#f5f1e7", minWebViewVersion: 108 },
 };
 export default config;

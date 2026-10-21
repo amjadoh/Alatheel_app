@@ -78,7 +78,7 @@ export function HorseFinancialPanel({
       <div className="finance-mini-grid">
         {!f.privateHorse && (
           <div>
-            <span>إيواء شهري متوقع</span>
+            <span>{TERMS.expectedBoarding}</span>
             <b>
               {amount(f.expected)} <small>ر.س</small>
             </b>
@@ -120,7 +120,7 @@ export function HorseFinancialPanel({
           >
             <span>
               {f.privateHorse
-                ? "ملك الإسطبل · تكلفة بدون إيراد إيواء"
+                ? "ملك الإسطبل · بدون رسوم إيواء"
                 : !f.complete
                   ? f.margin < 0
                     ? "عجز مقدّر على الأقل · تكلفة ناقصة"
@@ -161,7 +161,7 @@ export function HorseFinancialPanel({
           )}
           <p className="small muted">
             {f.privateHorse ? (
-              "خيل ملك خاص؛ يحسب ضمن تكلفة التغذية والمصروفات دون إيراد إيواء أو تحصيل على المالك."
+              "خيل ملك خاص؛ يحسب ضمن تكلفة التغذية والمصروفات دون رسوم إيواء أو تحصيل على المالك."
             ) : (
               <>
                 الإيواء وفق سياسة الشهر الكامل أو الأيام المسجلة للخيل. التغذية
@@ -259,7 +259,7 @@ export function FinancialDashboard({
         </button>
       </div>
       <section className="card">
-        <h2>الدخل والتكلفة المتوقعة</h2>
+        <h2>الإيواء والتكلفة المتوقعة</h2>
         <div
           className={`profit-banner ${f.operatingBalance < 0 ? "negative" : "positive"}`}
         >
@@ -269,7 +269,7 @@ export function FinancialDashboard({
           <strong>{amount(f.operatingBalance)} ر.س</strong>
         </div>
         <p className="small muted">
-          الدخل المتوقع − استهلاك التغذية ومصروفات التشغيل. المصروف غير المدفوع
+          الإيواء والمصروفات المستردة من الملاك − استهلاك التغذية ومصروفات التشغيل. المصروف غير المدفوع
           يدخل في التكلفة، ويظهر ضمن المدفوعات عند سداده فقط.{" "}
           {f.incompleteCount
             ? "التكلفة مبدئية لوجود بيانات تغذية ناقصة."
@@ -279,10 +279,10 @@ export function FinancialDashboard({
       <div className="dashboard-grid finance-grid">
         <button className="stat dark" onClick={() => onGo("income")}>
           <Wallet />
-          <span>الدخل المتوقع</span>
+          <span>{TERMS.expectedOwnerTotal}</span>
           <strong>{amount(f.revenue)}</strong>
           <small>
-            إيواء {amount(f.expected)}
+            رسوم الإيواء {amount(f.expected)}
             {f.recoveries ? ` + مصروفات تُسترد ${amount(f.recoveries)}` : ""}
           </small>
         </button>
@@ -335,7 +335,7 @@ export function FinancialDashboard({
           </strong>
         </div>
         <p className="small muted">
-          الدخل المتوقع {amount(f.revenue)} − رواتب وتشغيل ومشتريات علف حسب
+          الإجمالي المتوقع من الملاك {amount(f.revenue)} − رواتب وتشغيل ومشتريات علف حسب
           التكرار {amount(f.plannedPayments)} ر.س. هذا تخطيط للدفع، مستقل عن
           تكلفة الاستهلاك والسداد الفعلي.
         </p>

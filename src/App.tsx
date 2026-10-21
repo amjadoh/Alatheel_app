@@ -5,7 +5,10 @@ import { FeedingEditor, FeedingPlanSummary, feedingFormError } from "./feeding-e
 import { feedingAtDate, feedingOnDate, scheduledFeedingDates } from "../functions/src/feeding";
 import { useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { inventoryNeeds } from "../functions/src/inventory-needs";
-import { InventoryDashboard, InventoryItemNeeds } from "./inventory-dashboard";
+import { InventoryDashboard, InventoryItemNeeds, InventoryRunwayPanel } from "./inventory-dashboard";
+import { inventoryRunway } from "../functions/src/inventory-runway";
+import { operationalFollowUp } from "../functions/src/follow-up";
+import { TodayActions, AccountReview, CashForecast } from "./follow-up-ui";
 import {
   LayoutDashboard,
   Package,
@@ -75,6 +78,9 @@ import {
 import { prepareHorsePhoto } from "./horse-photo";
 import { businessDay } from "../functions/src/dates";
 import type { AuthPhase } from "./auth-recovery";
+import { StartupScreen } from "./startup-screen";
+import { startupProgress } from "./startup-progress";
+import type { StartupDataProgress } from "./startup-data";
 import { similarItems } from "../functions/src/inventory";
 import { stayDays } from "../functions/src/boarding";
 import {
@@ -180,11 +186,13 @@ export default function App() {
     [a, setActor] = useState<Actor | null>(null),
     [authPhase, setAuthPhase] = useState<AuthPhase>("restoring"),
     [authIssue, setAuthIssue] = useState(""),
+    [startupData, setStartupData] = useState<StartupDataProgress>({ stage: "session", completed: 0, total: 0 }),
     [tab, setTab] = useState("dashboard"),
     [form, setForm] = useState<Form | null>(null),
     [detail, setDetail] = useState<{
       title: string;
-      content: ReactNode;
+      content?: ReactNode;
+      horseId?: string;
     } | null>(null),
     [toast, setToast] = useState(""),
     [error, setError] = useState(""),
@@ -212,11 +220,12 @@ export default function App() {
     prevUid = useRef<string | null>(null);
   useEffect(
     () =>
-      connect((state, actor, e, phase) => {
+      connect((state, actor, e, phase, progress) => {
         setState(state);
         setActor(actor);
         setAuthPhase(phase || (actor ? "ready" : "signed-out"));
         setAuthIssue(e || "");
+        if (progress) setStartupData(progress);
         if (e) setError(e);
         if (actor?.uid !== prevUid.current) {
           setTab("dashboard");
@@ -261,6 +270,8 @@ export default function App() {
     };
   }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen]);
   const stockNeeds = useMemo(() => inventoryNeeds(s, inventoryDay), [s, inventoryDay]);
+  const followUp = useMemo(() => a?.dataReady && staff(a) ? operationalFollowUp(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
+  const stockRunway = useMemo(() => a?.dataReady && staff(a) ? inventoryRunway(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
   const isStaff = !!a && staff(a),
     isAdmin = a?.role === "admin",
     name = s.settings[0]?.stableName || "إسطبل الأثيل",
@@ -815,12 +826,13 @@ export default function App() {
       note: "هذه الشاشة تمنح حساب Google صلاحية الدخول. إرسال الدعوة اختياري. الربط بسجل المالك يتيح له رؤية خيله والتحصيلات السابقة. لتسجيل بياناته فقط استخدم قسم الملاك.",
       submit: (d) => member(u ? "update" : "create", u?.id, d),
     });
-  const horseDetail = (h: Row) => {
+  // Keep only the horse identity; financial content is derived from the latest
+  // ready state when displayed, never captured from a partial startup snapshot.
+  const horseDetail = (h: Row) => setDetail({ title: h.name, horseId: h.id });
+  const renderHorseDetail = (h: Row) => {
     const c = horseCost(s, h, month);
     const url = import.meta.env.VITE_PUBLIC_APP_URL;
-    setDetail({
-      title: h.name,
-      content: (
+    return (
         <>
           <HorsePhoto horse={h} large />
           <HorseFinancialPanel
@@ -1018,11 +1030,10 @@ export default function App() {
             </div>
           )}
         </>
-      ),
-    });
+      );
   };
   useEffect(() => {
-    if (!a || !s.horses.length) return;
+    if (!a?.dataReady || !s.horses.length) return;
     const id = new URLSearchParams(location.search).get("horse");
     if (id) {
       const h = s.horses.find((h) => h.id === id);
@@ -1031,12 +1042,23 @@ export default function App() {
         history.replaceState({}, "", location.pathname);
       }
     }
-  }, [a?.uid, s.horses.length]);
+  }, [a?.uid, a?.dataReady, s.horses.length]);
   const collect = (h: Row) => {
     setDetail(null);
     setAccountHorseId(h.id);
   };
   const appUpdates=useAppUpdate();
+  const detailHorse = detail?.horseId ? s.horses.find(h => h.id === detail.horseId) : undefined;
+  const opening = appUpdates.blocked || appUpdates.checking || (!a && authPhase !== "signed-out") || a?.dataReady === false;
+  const recordedReady = useRef(false);
+  useEffect(() => {
+    if (opening) { recordedReady.current = false; return; }
+    if (recordedReady.current) return;
+    recordedReady.current = true;
+    performance.mark("alatheel:screen-ready");
+    // No account or financial data enters the diagnostic startup marker.
+    console.info("AlatheelStartup", JSON.stringify({ event: "screen-ready", elapsedMs: Math.round(performance.now()), screen: a ? "account" : "sign-in" }));
+  }, [opening, a?.uid]);
   const notifications = useStaffNotifications(a, target => {
     setDetail(null);setAccountMenuOpen(false);
     if(target.page === "update"){appUpdates.check();go("more");return;}
@@ -1101,6 +1123,19 @@ export default function App() {
       />
     </label>
   );
+  if (opening) return <StartupScreen
+    progress={startupProgress({
+      sessionResolved: authPhase === "signed-out" || !!a || startupData.stage !== "session",
+      authorized: !!a,
+      verifiedVersion: appUpdates.verified && !appUpdates.checking,
+      dataReady: !!a?.dataReady || authPhase === "signed-out",
+      received: startupData.completed,
+      expected: startupData.total,
+    })}
+    issue={authIssue || (authPhase === "waiting" && !online ? "تحقق من الاتصال ثم أعد المحاولة" : undefined)}
+    onRetry={authIssue || authPhase === "waiting" || authPhase === "blocked" ? retryLoginSession : undefined}
+    onLogout={authIssue || authPhase === "waiting" || authPhase === "blocked" ? () => void logout() : undefined}
+  />;
   return (
     <div className="app" dir="rtl">
       {!online && (
@@ -1245,6 +1280,24 @@ export default function App() {
             {a.dataReady !== false && tab === "dashboard" && (
               <>
                 {heading(`مرحبًا، ${a.displayName}`)}
+                {isStaff && followUp && <div className="daily-follow-up">
+                  <TodayActions followUp={followUp}
+                    stockItems={s.mealTypes.filter(m => Number(m.currentStock) <= Number(m.minThreshold || 0) || (stockRunway?.items.some(i => i.id === m.id && !!i.needsProvidingDate && i.needsProvidingDate <= inventoryDay))).map(m => ({ id: m.id, name: m.name, message: Number(m.currentStock) <= 0 ? "الصنف نافد" : stockRunway?.items.some(i => i.id === m.id && i.needsProvidingDate === inventoryDay) ? "الكمية لا تكفي وجبات اليوم" : "وصل إلى حد التنبيه" }))}
+                    onHorse={id => { const h = s.horses.find(h => h.id === id); if (h) { go("income"); collect(h); } }}
+                    onInventory={id => { go("inventory"); setSearch(s.mealTypes.find(m => m.id === id)?.name || ""); }}
+                    onRequests={() => go("requests")}
+                  />
+                  <AccountReview followUp={followUp} onObservation={observation => {
+                    if (observation.entity === "horse") { const h=s.horses.find(h=>h.id===observation.id); if(h) horseForm(h); }
+                    else if (observation.entity === "meal") { const m=s.mealTypes.find(m=>m.id===observation.id); if(m) mealForm(m); }
+                    else if (observation.entity === "expense") { go("expenses"); setSearch(s.expenses.find(e=>e.id===observation.id)?.name || ""); }
+                    else if (isStaff) setDetail({ title: observation.name || "مراجعة الحسابات", content: <>
+                      <p>{observation.message}</p>
+                      {observation.code === "payable_history_incomplete" && <p>الفترات التي لا تتوفر لها حسابات محفوظة تحتاج مراجعة سجلاتها قبل اعتماد أرقامها. لا يعيد التطبيق حساب هذه الفترات أو تعديلها تلقائيًا.</p>}
+                    </> });
+                  }} />
+                  <CashForecast forecast={followUp.forecast} />
+                </div>}
                 <label className="period">
                   الفترة{" "}
                   <input
@@ -1317,7 +1370,7 @@ export default function App() {
                       >
                         <Users />
                         <span>
-                          {isStaff ? "الملاك" : "الإيواء المتوقع خلال الفترة"}
+                          {isStaff ? "الملاك" : TERMS.expectedBoarding}
                         </span>
                         <strong>
                           {isStaff
@@ -1541,7 +1594,7 @@ export default function App() {
                         <p>{h.ownerName}</p>
                         {isStaff && (
                           <div className="horse-finance-line">
-                            <span>الدخل {money(f.revenue)}</span>
+                            {!f.privateHorse && <span>{TERMS.expectedOwnerAmount} {money(f.revenue)}</span>}
                             <span>التكلفة {money(f.total)}</span>
                           </div>
                         )}
@@ -1719,6 +1772,7 @@ export default function App() {
                       </span>
                     </div>
                     <InventoryItemNeeds item={stockNeeds.items.find(i => i.id === m.id)!} end={stockNeeds.end} />
+                    {stockRunway?.items.find(i => i.id === m.id) && <InventoryRunwayPanel item={stockRunway.items.find(i => i.id === m.id)!} today={inventoryDay} horizonEnd={stockRunway.horizonEnd} />}
                     <p className="muted">
                       حد التنبيه {displayQuantity(m.minThreshold)} · سعر وحدة الشراء{" "}
                       {displayPrice(m.pricePerUnit)} ر.س
@@ -2591,14 +2645,14 @@ export default function App() {
           />
         </Modal>
       )}
-      {detail && (
-        <Modal title={detail.title} close={() => !busy && setDetail(null)}>
+      {detail && (!detail.horseId || detailHorse) && (
+        <Modal title={detailHorse?.name || detail.title} close={() => !busy && setDetail(null)}>
           {error && (
             <p className="notice" role="alert">
               {error}
             </p>
           )}
-          {detail.content}
+          {detailHorse ? renderHorseDetail(detailHorse) : detail.content}
         </Modal>
       )}
     </div>
