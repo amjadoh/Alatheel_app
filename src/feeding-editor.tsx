@@ -52,8 +52,8 @@ export function FeedingEditor({ plans, meals, month, onChange }: { plans: any[];
       const mode = monthly ? multiple ? "monthly" : "once" : "daily";
       const dates = !legacy && !feedingFormError([plan]) ? scheduledFeedingDates(plan, month) : [];
       const setCount = (raw: string | number) => {
-        setMultipleModes(current=>({...current,[i]:true}));
         const next = Number(raw);
+        setMultipleModes(current=>({...current,[i]:typeof raw === "string" || next !== 1}));
         change({ timesPerMonth: raw, schedule: Number.isInteger(next) && next >= 1 && next <= 28 ? Array.from({ length: next }, (_, slot) => plan.schedule?.[slot] || blankSlot()) : [] });
       };
       return <div className="feeding-item" key={i}>

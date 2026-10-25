@@ -1827,7 +1827,7 @@ export default function App() {
                                   .map((t) => (
                                     <div className="record" key={t.id}>
                                       <b>
-                                        {t.movementKind === "purchase"
+                                        {t.movementKind === "purchase_correction" ? "تصحيح شراء" : t.movementKind === "purchase"
                                           ? "شراء مدفوع"
                                           : t.type === "add"
                                             ? "تصحيح / إضافة"
@@ -1843,7 +1843,7 @@ export default function App() {
                                       )}
                                       {t.movementKind === "purchase_correction" && <>
                                         <p>تصحيح شراء: من {displayQuantity(t.previousQuantity)} إلى {displayQuantity(t.correctedQuantity)} {t.unit} · من {money(t.previousTotal)} إلى {money(t.correctedTotal)} ر.س</p>
-                                        <p className="small muted">الشراء الأصلي: <bdi>{t.originalPurchaseId}</bdi> · {t.closedPeriodSettlement ? `تسوية في ${displayMonth(t.settlementPeriod)}` : "تم تحديث المصروف والسداد"}{t.stockCountPreserved ? " · الكمية المطابقة محفوظة" : ""}</p>
+                                        <p className="small muted">شراء بتاريخ {displayDate(t.paidAt)} · {t.closedPeriodSettlement ? `تسوية في ${displayMonth(t.settlementPeriod)}` : "تم تحديث المصروف والسداد"}{t.stockCountPreserved ? " · الكمية المطابقة محفوظة" : ""}</p>
                                       </>}
                                       {t.movementKind === "purchase" && t.latestCorrectionId && <p className="small muted">سجل الشراء الأصلي محفوظ؛ راجع التصحيحات المرتبطة به.</p>}
                                       {t.movementKind === "purchase" && isAdmin && <Button kind="outline" onClick={()=>correctPurchase(t)}>تصحيح عملية الشراء</Button>}
