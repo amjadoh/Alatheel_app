@@ -34,7 +34,7 @@ def identity():
     return _identity[0]
 
 def bridge(action, **data):
-    return request(BRIDGE, "POST", {"action": action, **data}, {"Authorization": "Bearer " + identity()})
+    return request(BRIDGE, "POST", {"action": action, **data}, {"X-Alatheel-Workflow-Token": identity()})
 
 def ensure_branch():
     try:

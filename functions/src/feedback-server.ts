@@ -86,8 +86,13 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
     res.set("Cache-Control", "no-store");
     if (req.method !== "POST") { res.status(405).end(); return; }
     let worker: string;
-    try { worker = await verifyBridgeToken(String(req.headers.authorization || "").replace(/^Bearer /, ""), githubSigningKey); }
-    catch { res.status(401).json({ error: "Unauthorized workflow" }); return; }
+    try { worker = await verifyBridgeToken(String(req.headers["x-alatheel-workflow-token"] || req.headers.authorization || "").replace(/^Bearer /, ""), githubSigningKey); }
+    catch (error) {
+      const safe = new Set(["Invalid issuer or audience","Wrong repository","Wrong repository context","Wrong workflow","Wrong event","Expired or premature token","Invalid run identity","Invalid token","Invalid signing algorithm","Invalid signature","OIDC keys unavailable","Invalid OIDC keys","Unknown signing key"]);
+      const reason = error instanceof Error && safe.has(error.message) ? error.message : "Unreadable workflow token";
+      console.warn("Feedback workflow authorization rejected", { reason });
+      res.status(401).json({ error: "Unauthorized workflow" }); return;
+    }
     try {
       const { action, id, file: fileIndex } = req.body || {}, now = Date.now();
       if (action === "claim") {
