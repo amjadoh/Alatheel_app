@@ -1,0 +1,18 @@
+{
+  "id": "50e5a902-c865-47ac-96e2-91e1d5cf0d0f",
+  "text": "عملت تصحيح دفعة بالخطاء وانا المفروض اسوي الغاء",
+  "files": [
+    {
+      "index": 0,
+      "name": "1000290132.jpg",
+      "extension": "jpg",
+      "size": 484112,
+      "sha256": "c09bcc825bb886d41f8e393d3f4e97258cc644e6fa96cfd46d9dbfa1aac4da1d",
+      "mime": "image/jpeg",
+      "chunks": 2
+    }
+  ],
+  "version": "1.10.1",
+  "createdByName": "احمد عبدالرحمن اللهيبي",
+  "createdAt": "2026-10-25T16:19:15.928Z"
+}
