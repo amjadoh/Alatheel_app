@@ -1,3 +1,4 @@
+import { pushDeliveryPlan, pushDeliveryResults } from "./push-delivery";
 import { createHash } from "node:crypto";
 import { getMessaging } from "firebase-admin/messaging";
 import {
@@ -23,7 +24,6 @@ import {
   allowedAlertKinds,
   appUpdateAlert,
   deliveryDecision,
-  deviceWantsAlert,
   pushCopy,
   riyadhClock,
   type StaffAlert,
@@ -38,6 +38,7 @@ export function notificationFunctions(
   databaseId: string,
   options: { region: string; maxInstances: number },
   verify: (request: any) => Promise<any>,
+  sendPush: (message:any)=>Promise<{responses:{success:boolean;error?:{code?:string}}[]}> = message=>getMessaging().sendEachForMulticast(message),
 ) {
   async function readState(tx: Transaction, names: Collection[]) {
     const state = emptyState();
@@ -360,43 +361,31 @@ export function notificationFunctions(
         .collection("pushDevices")
         .where("userId", "==", userId)
         .get();
-      const selected = devices.docs.filter((d) =>
-        deviceWantsAlert({ id: d.id, ...d.data() }, alert as StaffAlert),
-      );
-      if (selected.length) {
-        const copy = pushCopy(alert.kind);
-        const result = await getMessaging().sendEachForMulticast({
-          tokens: selected.map((d) => d.data().token),
-          data: { ...copy, alertId, userId, kind: alert.kind },
-          android: {
-            priority: "high",
-            ttl: alert.kind === "collection_due" ? 3 * 3600000 : 24 * 3600000,
-            collapseKey: alertId,
-          },
-        });
-        const deletes: Promise<any>[] = [];
-        let transient = false;
-        result.responses.forEach((r, i) => {
-          if (!r.success) {
-            const code = r.error?.code || "";
-            if (
-              [
-                "messaging/registration-token-not-registered",
-                "messaging/invalid-registration-token",
-              ].includes(code)
-            )
-              deletes.push(selected[i].ref.delete());
-            else transient = true;
-          }
-        });
-        await Promise.all(deletes);
-        if (transient) throw new Error("Temporary messaging failure");
+      const plan = pushDeliveryPlan(devices.docs.map(d=>({id:d.id,...d.data()})), alert as StaffAlert);
+      const selected = devices.docs.filter(d=>plan.targets.some(t=>t.id===d.id));
+      if (!selected.length) {
+        await ref.update({deliveryState:plan.idleState,leaseUntil:0,
+          deliveryAttempts:Number(alert.deliveryAttempts||0),pushTargetCount:0,
+          pushSuccessCount:(alert.pushDeliveredDeviceIds||[]).length,
+          pushStatusReason:plan.idleState==="not_needed" ? "already_current" : plan.idleState==="sent" ? "previously_accepted" : "no_eligible_device",
+          ...(plan.idleState!=="sent" ? {deliveredAt:null} : {})});
+        return;
       }
-      await ref.update({
-        deliveryState: "sent",
-        deliveredAt: new Date().toISOString(),
-        leaseUntil: 0,
+      const copy = pushCopy(alert.kind);
+      const result = await sendPush({
+        tokens:selected.map(d=>d.data().token),data:{...copy,alertId,userId,kind:alert.kind},
+        android:{priority:"high",ttl:alert.kind==="collection_due" ? 3*3600000 : 24*3600000,collapseKey:alertId},
       });
+      const outcome=pushDeliveryResults(selected.map(d=>d.id),result.responses,alert.pushDeliveredDeviceIds||[]);
+      // Persist accepted device IDs before cleanup, so a partial retry does not
+      // send another notification to devices that already accepted this alert.
+      await ref.update({deliveryState:outcome.state,leaseUntil:0,pushTargetCount:selected.length,
+        pushSuccessCount:outcome.successCount,pushTransientCount:outcome.transientCount,
+        pushInvalidCount:outcome.invalidIds.length,pushDeliveredDeviceIds:outcome.deliveredIds,
+        lastPushAttemptAt:new Date().toISOString(),
+        pushStatusReason:outcome.state==="sent" ? "messaging_accepted" : outcome.state==="pending" ? "temporary_failure" : "invalid_device_token",
+        deliveredAt:outcome.successCount ? new Date().toISOString() : null});
+      await Promise.all(outcome.invalidIds.map(id=>devices.docs.find(d=>d.id===id)!.ref.delete()));
     } catch (error) {
       await ref.update({ deliveryState: "pending", leaseUntil: 0 });
     }
@@ -434,7 +423,7 @@ export function notificationFunctions(
         if (!eligiblePushUser({ ...u.data(), id: u.id } as any)) continue;
         const rows = await u.ref
           .collection("staffAlerts")
-          .where("deliveryState", "in", ["pending", "sending"])
+          .where("deliveryState", "in", ["pending", "sending", "waiting_device"])
           .limit(Math.min(25, 50 - processed))
           .get();
         for (const row of rows.docs) {

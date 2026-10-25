@@ -76,7 +76,7 @@ export function appUpdateAlert(manifest: any): StaffAlert {
 }
 /** At most three attempts within 24 hours; no seven-day platform retry policy. */
 export function deliveryDecision(row: Row, now = Date.now()) {
-  if (["sent", "cancelled", "failed"].includes(row.deliveryState))
+  if (["sent", "cancelled", "failed", "not_needed"].includes(row.deliveryState))
     return "done";
   if (row.deliveryState === "sending" && Number(row.leaseUntil) > now)
     return "leased";
