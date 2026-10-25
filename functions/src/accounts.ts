@@ -1,3 +1,4 @@
+import { accountingView } from './accounting-boundary';
 import { money, nextMonth } from "./domain";
 import type { State, Row } from "./domain";
 import { businessDay } from "./dates";
@@ -29,6 +30,7 @@ export function horseAccount(
   asOf: string,
   horizon = endOfMonth(asOf),
 ) {
+  s=accountingView(s); h=s.horses.find(x=>x.id===h.id)||h;
   const receipts = s.income.filter((i) => i.horseId === h.id && isReceipt(i));
   const items = new Map<string, AccountItem>();
   const add = (item: AccountItem) => {

@@ -21,7 +21,7 @@ import java.util.concurrent.Executors;
 
 public class StaffMessagingService extends FirebaseMessagingService {
     private static final java.util.concurrent.ExecutorService TOKEN_WORKER=Executors.newSingleThreadExecutor();
-    public static void channels(Context context){if(Build.VERSION.SDK_INT>=26){NotificationManager manager=context.getSystemService(NotificationManager.class);String[] ids={"collection_due","stock_low","stock_empty","app_update"},names={"استحقاق التحصيل","انخفاض المخزون","نفاد المخزون","إصدارات التطبيق"};for(int i=0;i<ids.length;i++)manager.createNotificationChannel(new NotificationChannel("alatheel_"+ids[i],names[i],NotificationManager.IMPORTANCE_DEFAULT));}}
+    public static void channels(Context context){if(Build.VERSION.SDK_INT>=26){NotificationManager manager=context.getSystemService(NotificationManager.class);String[] ids={"collection_due","stock_low","stock_empty","app_update","app_feedback"},names={"استحقاق التحصيل","انخفاض المخزون","نفاد المخزون","إصدارات التطبيق","بلاغات التطبيق"};for(int i=0;i<ids.length;i++)manager.createNotificationChannel(new NotificationChannel("alatheel_"+ids[i],names[i],NotificationManager.IMPORTANCE_DEFAULT));}}
     @Override public void onMessageReceived(@NonNull RemoteMessage message){
         Map<String,String> data=message.getData();String id=data.get("alertId"),uid=data.get("userId"),kind=data.get("kind");
         SharedPreferences p=getSharedPreferences("alatheel_staff_push",0);

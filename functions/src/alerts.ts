@@ -1,13 +1,13 @@
 import type { Row, State } from "./domain";
 import { horseAccount } from "./accounts";
 export type AlertKind =
-  "collection_due" | "stock_low" | "stock_empty" | "app_update";
+  "collection_due" | "stock_low" | "stock_empty" | "app_update" | "app_feedback";
 export type StaffAlert = {
   key: string;
   kind: AlertKind;
   title: string;
   body: string;
-  page: "income" | "inventory" | "update";
+  page: "income" | "inventory" | "update" | "feedback";
   horseId?: string;
   mealTypeId?: string;
   amount?: number;
@@ -46,7 +46,7 @@ export const eligiblePushUser = (u: Row) =>
   u.membershipApproved === true;
 export const allowedAlertKinds = (u: Row): AlertKind[] =>
   eligibleStaff(u)
-    ? ["collection_due", "stock_low", "stock_empty", "app_update"]
+    ? ["collection_due", "stock_low", "stock_empty", "app_update", ...(String(u.email).toLowerCase()==="amjadoh@gmail.com"?["app_feedback" as const]:[])]
     : eligiblePushUser(u)
       ? ["app_update"]
       : [];
@@ -95,7 +95,7 @@ export function deviceWantsAlert(
   return (
     device.enabled === true &&
     Number(device.sessionExpiresAt) > now &&
-    (!device.kinds || device.kinds.includes(alert.kind)) &&
+    (alert.kind === "app_feedback" || !device.kinds || device.kinds.includes(alert.kind)) &&
     (alert.kind !== "app_update" ||
       Number(device.installedVersionCode || 0) < Number(alert.versionCode))
   );
@@ -147,6 +147,7 @@ export function stockAlert(
 }
 /** Push banners omit financial details; the authenticated inbox provides the complete alert. */
 export function pushCopy(kind: AlertKind) {
+  if(kind==="app_feedback")return {title:"بلاغ جديد على تطبيق الأثيل",body:"وصل بلاغ جديد. افتح التطبيق لمراجعته."};
   if (kind === "app_update")
     return {
       title: "تحديث جديد للأثيل",

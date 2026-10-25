@@ -1,0 +1,64 @@
+/* Approved “واضح وخفيف” product palette, shared by pages and overlays. */
+.app.clear-light{--paper:#f6f4ed;--ink:#192a2b;--gold:#8b671b;--muted:#667373;--line:#e5e6dd;--surface:#fffefa;--teal:#267c71;--teal-soft:#dbefe8;--gold-soft:#f4e8be;--amber:#9b682e;--amber-soft:#f6e6d3;--blue:#42748d;--blue-soft:#e0edf5;--coral:#a54d3e;--coral-soft:#fae7df;background:var(--paper);color:var(--ink)}
+.clear-light .card,.clear-light .sheet,.clear-light .modal,.clear-light .form-view{background:var(--surface);border-color:transparent;border-radius:20px;box-shadow:none}
+.clear-light header,.clear-light .bottom-nav{background:var(--paper)}
+.clear-light .button.gold,.clear-light .button.dark{background:var(--ink);color:#fff9e9;border-color:var(--ink)}
+.clear-light .button.outline{background:var(--surface);border-color:var(--line);color:var(--ink)}
+.clear-light .pill{background:var(--gold-soft);color:var(--gold)}
+.clear-light .pill.red,.clear-light .notice.error,.clear-light .negative{background:var(--coral-soft);color:var(--coral)}
+.clear-light .notice:not(.error){background:#eef1eb;color:var(--muted);border-color:transparent;border-radius:13px}
+.clear-light .positive,.clear-light .pill.green{background:var(--teal-soft);color:var(--teal)}
+.clear-light .field input,.clear-light .field select,.clear-light .field textarea,.clear-light .period input{background:var(--surface);color:var(--ink);border-color:var(--line);border-radius:13px}
+.clear-light button,.clear-light input,.clear-light select,.clear-light textarea{touch-action:manipulation}
+.clear-light :is(button,input,select,textarea):focus-visible{outline:3px solid var(--teal);outline-offset:3px}
+.clear-light .button,.clear-light .stat{transition:transform .14s ease,background-color .14s ease}
+.clear-light .button:active,.clear-light .stat:active{transform:scale(.985)}
+.clear-light .stat{border:0;border-radius:16px;padding:16px;text-align:right;min-width:0;box-shadow:none}
+.clear-light .stat strong{font-size:27px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.clear-light .stat>small{font-size:11px;display:flex;align-items:center;gap:4px}
+.clear-light .stat strong small{font-size:11px;font-weight:400}
+.clear-light .stat .spread{align-items:flex-start;font-size:12px;gap:8px;min-height:40px}
+.clear-light .stat .spread svg{flex:none;margin-top:3px}
+.clear-light .stat.tone-services{background:var(--gold-soft);color:var(--gold)}
+.clear-light .stat.tone-collected{background:var(--teal-soft);color:var(--teal)}
+.clear-light .stat.tone-cost{background:var(--amber-soft);color:var(--amber)}
+.clear-light .stat.tone-paid{background:var(--blue-soft);color:var(--blue)}
+.clear-light .monthly-section{font-size:15px;margin:22px 0 13px}
+.clear-light .coverage-summary{background:var(--teal-soft);border-radius:22px;padding:21px;margin:16px 0}
+.clear-light .coverage-summary h2{font-size:15px;margin:0 0 17px}
+.clear-light .coverage-summary p{font-size:12px;margin:7px 0;color:var(--muted)}
+.clear-light .coverage-summary .coverage-value{display:block;font-size:38px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.clear-light .coverage-value small{font-size:12px;font-weight:400;letter-spacing:0}
+.clear-light .coverage-summary>.spread>svg{width:25px;height:25px;color:var(--teal);flex:none}
+.clear-light .coverage-labels{display:flex;justify-content:space-between;gap:12px;margin:16px 0 10px}
+.clear-light .coverage-labels button{border:0;background:none;padding:4px 0;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right;line-height:1.8}
+.clear-light .coverage-strip{height:13px;border-radius:20px;overflow:hidden;display:flex;background:var(--line)}
+.clear-light .coverage-strip>span{height:100%;transition:width .25s ease}
+.clear-light .coverage-strip>span:first-child{background:var(--teal)}
+.clear-light .coverage-strip>span+span{background:var(--coral);opacity:.6}
+.clear-light .monthly-dashboard .big-number{font-size:30px;font-weight:800;display:block;color:var(--ink);font-variant-numeric:tabular-nums}
+.clear-light .monthly-dashboard .ledger dd{font-weight:800}
+.clear-light .monthly-dashboard details>summary{min-height:44px;font-size:13px;padding:12px 0}
+.clear-light .inventory-period{background:var(--blue-soft);color:var(--ink)}
+.clear-light .inventory-period>span,.clear-light .inventory-period>small{color:var(--blue)}
+.clear-light .inventory-metrics>div{background:var(--surface);border:0;border-radius:16px}
+.clear-light .inventory-quantities{display:block;margin:14px 0}
+.clear-light .inventory-quantities>div{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:13px 0}
+.clear-light .inventory-quantities>div+div{border-top:1px solid var(--line)}
+.clear-light .inventory-quantities>div>span{max-width:57%;line-height:1.8}
+.clear-light .inventory-quantities strong{font-size:24px;color:var(--blue);text-align:left;min-width:0}
+.clear-light .inventory-quantities>div+div strong{font-size:19px}
+.clear-light .inventory-coverage>span{background:var(--teal)}
+.clear-light .inventory-runway{background:var(--teal-soft);color:var(--teal)}
+.clear-light .inventory-runway.short{background:var(--coral-soft);color:var(--coral)}
+.clear-light .inventory-shortage.short{background:var(--coral-soft);color:var(--coral)}
+.clear-light .finance-mini-grid>div:nth-child(1){background:var(--gold-soft);color:var(--gold);border:0}
+.clear-light .finance-mini-grid>div:nth-child(2){background:var(--amber-soft);color:var(--amber);border:0}
+.clear-light .finance-mini-grid>div:nth-child(3){background:var(--teal-soft);color:var(--teal);border:0}
+.clear-light .feedback-note,.clear-light .feedback-panel{background:var(--surface);color:var(--ink);border-color:var(--line)}
+.clear-light .feedback-launcher{background:var(--ink);color:#fff9e9;box-shadow:none}
+.clear-light .account-menu{background:var(--surface);color:var(--ink);border-color:var(--line)}
+@media(max-width:360px){.clear-light .stat{padding:13px}.clear-light .stat strong{font-size:23px}.clear-light .coverage-summary{padding:17px}.clear-light .coverage-summary .coverage-value{font-size:33px}}
+@media(prefers-reduced-motion:reduce){.clear-light .button,.clear-light .stat,.clear-light .coverage-strip>span{transition:none}.clear-light .button:active,.clear-light .stat:active{transform:none}}
+
+.clear-light .feedback-full-image{display:block;width:100%;height:auto;border-radius:14px;margin:12px 0}

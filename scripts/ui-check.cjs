@@ -107,7 +107,7 @@ async function main() {
             layout.closeSize >= 44,
         );
         assert.deepEqual(layout.headings, [
-          "📖 التعليمات", "💬 ملاحظات التطبيق", "🐎 الخيل والتغذية", "📦 المخزون", "💳 التحصيل وكشف حساب الخيل", "📅 حفظ حسابات الأشهر السابقة",
+          "👤 الحساب والبلاغات", "📊 الرئيسية", "🐎 الخيل", "📦 المخزون", "💳 التحصيل", "🧾 المصروفات",
         ]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),
@@ -202,13 +202,13 @@ async function main() {
         "Purchase UI changes quantity and creates exactly one expense and payment",
         async () => {
           await nav
-            .getByRole("button", { name: "المخزون", exact: true })
+            .getByRole("button", { name: "المصروفات", exact: true })
             .click();
           await page
-            .getByRole("button", { name: "شراء وإضافة", exact: true })
+            .getByRole("button", { name: /^شراء / }).first()
             .click();
           const form = page.getByRole("dialog", {
-            name: "شراء وإضافة · مركزات",
+            name: "شراء مخزون · مركزات",
           });
           await form.getByLabel(/الكمية المشتراة/).fill("20");
           await form.getByLabel(/إجمالي المبلغ المدفوع/).fill("1800");
@@ -583,11 +583,11 @@ async function main() {
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       const noOverflow=await rhodes.evaluate(e=>e.scrollWidth<=e.clientWidth+1);assert.ok(noOverflow);
       await page.screenshot({path:path.join(output,`inventory-${width}.png`),fullPage:true});
-      await rhodes.getByRole("button",{name:"شراء وإضافة",exact:true}).click();
+      await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"المصروفات",exact:true}).click();await page.getByRole("button",{name:"شراء الرودس",exact:true}).click();
       const form=page.getByRole("dialog");await form.getByLabel(/الكمية المشتراة/).fill("6");await form.getByLabel(/إجمالي المبلغ المدفوع/).fill("180");
       await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();await form.waitFor({state:"detached"});
       const s=await snapshot(page);assert.equal(s.mealTypes[0].currentStock,16);assert.equal(s.expensePayments.length,1);assert.equal(s.expensePayments[0].amount,180);
-      assert.match(clean(await rhodes.locator(".inventory-shortage").textContent()),/0 ربطة/);
+      await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"المخزون",exact:true}).click();assert.equal(await rhodes.locator(".inventory-shortage").count(),0);
       await page.clock.setSystemTime(new Date("2026-10-27T04:00:00Z"));await page.clock.runFor(31000);
       assert.match(clean(await dashboard.textContent()),/27\/10\/2026 — 27\/10\/2026/);
       await page.clock.setSystemTime(new Date("2026-10-28T04:00:00Z"));await page.clock.runFor(31000);

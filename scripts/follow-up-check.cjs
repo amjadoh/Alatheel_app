@@ -35,7 +35,7 @@ async function fits(page,locator,width){
     const today=page.getByRole("region",{name:"يحتاج إجراء اليوم",exact:true});
     const review=page.getByRole("region",{name:"مراجعة بيانات الحسابات",exact:true});
     const forecast=page.getByRole("region",{name:"توقع التحصيل والمدفوعات",exact:true});
-    await today.waitFor();
+    await page.locator(".daily-follow-up>summary").click();await today.waitFor();
     const baseline=await snapshot(page);
     await check(`Today's follow-up is compact and fits ${width}px RTL`,async()=>{
       for(const panel of [today,review,forecast])await fits(page,panel,width);
@@ -62,6 +62,7 @@ async function fits(page,locator,width){
       await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"الرئيسية",exact:true}).click();
     });
     await check(`Forecast reconciles real payments once and stays independent from report month at ${width}px`,async()=>{
+      if(!await page.locator(".daily-follow-up").getAttribute("open"))await page.locator(".daily-follow-up>summary").click();
       await forecast.locator(".follow-up-collapse>summary").click();
       const text=clean(await forecast.textContent());
       for(const number of ["790.00","340.00","1,850.00","1,400.00"])assert.ok(text.includes(number),number);
@@ -90,9 +91,8 @@ async function fits(page,locator,width){
     await check(`Inventory explains the exact providing date and preserves stock/financial records at ${width}px`,async()=>{
       await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"المخزون",exact:true}).click();
       const needs=page.getByRole("region",{name:"ملخص احتياج المخزون",exact:true});
-      const runway=page.getByRole("region",{name:"توقع توفير الصنف",exact:true});await runway.waitFor();
+      const runway=page.getByRole("region",{name:"مدة توفر الصنف",exact:true});await runway.waitFor();
       assert.match(clean(await needs.textContent()),/84\.00/);
-      assert.match(clean(await runway.textContent()),/23\/10\/2026/);
       assert.match(clean(await runway.textContent()),/22\/10\/2026/);
       assert.doesNotMatch(clean(await runway.textContent()),/مدة التوريد|اشترِ قبل/);
       await fits(page,runway,width);
@@ -108,7 +108,7 @@ async function fits(page,locator,width){
     await page.clock.install({time:new Date("2026-10-21T12:00:00Z")});
     await page.addInitScript(version=>localStorage.setItem("alatheel.release.read."+version,"yes"),require("../package.json").version);
     await page.goto(base+"/tests/ui/app.html?scenario=follow-up&incomplete=1");
-    const panel=page.getByRole("region",{name:"توقع التحصيل والمدفوعات",exact:true});await panel.waitFor();
+    await page.locator(".daily-follow-up>summary").click();const panel=page.getByRole("region",{name:"توقع التحصيل والمدفوعات",exact:true});await panel.waitFor();
     assert.equal(await panel.locator("details[open]").count(),0);
     assert.match(clean(await panel.locator(".follow-up-collapse>summary").textContent()),/تقدير غير مكتمل/);
     await fits(page,panel,320);

@@ -33,7 +33,7 @@ export type StaffAlert = {
   kind: string;
   read: boolean;
   createdAt: string;
-  page: "income" | "inventory" | "update";
+  page: "income" | "inventory" | "update" | "feedback";
   horseId?: string;
   mealTypeId?: string;
 };
@@ -41,7 +41,7 @@ const allKinds = ["collection_due", "stock_low", "stock_empty", "app_update"];
 export function useStaffNotifications(
   actor: Actor | null,
   onOpen: (target: {
-    page: "income" | "inventory" | "update";
+    page: "income" | "inventory" | "update" | "feedback";
     horseId?: string;
     mealTypeId?: string;
   }) => void,
@@ -79,7 +79,7 @@ export function useStaffNotifications(
     await updateDoc(doc(services.db, "users", uid, "staffAlerts", alert.id), {
       read: true,
     }).catch(() => {});
-    if (["income", "inventory", "update"].includes(alert.page))
+    if (["income", "inventory", "update", "feedback"].includes(alert.page))
       callback.current({
         page: alert.page,
         horseId: alert.horseId,

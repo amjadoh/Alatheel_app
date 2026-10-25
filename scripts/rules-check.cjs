@@ -27,7 +27,7 @@ async function main(){
     setDoc(doc(db,'horses/horse'),{name:'horse',ownerId:'owner',status:'private',feedingHistory:[],feeding:[],createdAt:stamp,updatedAt:stamp}),
     setDoc(doc(db,'incomes/locked_legacy'),{horseId:'horse',horseName:'horse',ownerId:'owner',amount:100,status:'void',dueDate:stamp,collectedAt:stamp,receiptAuditLocked:true}),
     setDoc(doc(db,'incomes/modern_receipt'),{horseId:'horse',horseName:'horse',ownerId:'owner',amount:100,status:'collected',dueDate:stamp,collectedAt:stamp,accountVersion:1}),
-    setDoc(doc(db,'appFeedback/sample'),{text:'private note',syncState:'queued'}),
+    setDoc(doc(db,'appFeedback/sample'),{text:'private note',syncState:'queued',createdBy:'staff'}),
     setDoc(doc(db,'appFeedback/sample/files/0/chunks/0'),{base64:'c2FtcGxl'})
    ]);
   });

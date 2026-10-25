@@ -1,3 +1,4 @@
+import { accountingView, boundedExpense } from './accounting-boundary';
 import { money, shares } from "./domain";
 import type { State, Row } from "./domain";
 import { feedingMeasure, feedingUnitPrice, expenseFeedMeal, feedingAtDate, feedingOnDate, feedingSkipped, horsePresentOn } from "./feeding";
@@ -31,18 +32,20 @@ export function monthDays(month: string) {
 export function monthlyExpense(e: Row, month: string) {
   const days = monthDays(month),
     cost = Number(e.cost || 0);
+  const bound=boundedExpense(e,month,days);
+  if(bound.blocked) return 0;
   if (e.startMonth && e.startMonth > month) return 0;
   if (e.frequency === "once")
-    return businessDay(e.incurredAt || e.createdAt).slice(0, 7) === month
+    return businessDay(e.incurredAt || e.createdAt).slice(0, 7) === month && (!e.accountingStartDate || businessDay(e.incurredAt || e.createdAt)>=e.accountingStartDate)
       ? money(cost)
       : 0;
   return money(
     cost *
       (e.frequency === "daily"
-        ? days
+        ? bound.days
         : e.frequency === "weekly"
-          ? days / 7
-          : 1),
+          ? bound.days / 7
+          : bound.days / days),
   );
 }
 
@@ -50,6 +53,7 @@ export const expenseIsShared = (e: Row) =>
   e.allocationScope === "all_active" || !e.horseIds?.length;
 
 export function expenseShares(s: State, e: Row, month: string) {
+  s=accountingView(s);
   if (
     !expenseIsShared(e) &&
     e.frequency === "once" &&
@@ -91,6 +95,7 @@ function feedingItems(s: State, h: Row, month: string) {
 }
 
 export function horseCost(s: State, h: Row, month: string) {
+  s=accountingView(s); h=s.horses.find(x=>x.id===h.id)||h;
   const period = s.financialPeriods?.find((p) => p.id === month && p.closed);
   if (period) {
     const f = period.summary.horses.find((r: Row) => r.id === h.id);
@@ -160,6 +165,7 @@ export function horseCost(s: State, h: Row, month: string) {
 }
 
 export function costs(s: State, month: string) {
+  s=accountingView(s);
   const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);
   if (closed) {
     const f = closed.summary;

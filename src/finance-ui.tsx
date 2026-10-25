@@ -78,9 +78,9 @@ export function HorseFinancialPanel({
       <div className="finance-mini-grid">
         {!f.privateHorse && (
           <div>
-            <span>{TERMS.expectedBoarding}</span>
+            <span>{TERMS.expectedOwnerTotal}</span>
             <b>
-              {amount(f.expected)} <small>ر.س</small>
+              {amount(f.revenue)} <small>ر.س</small>
             </b>
           </div>
         )}
@@ -134,6 +134,7 @@ export function HorseFinancialPanel({
             </strong>
           </div>
           <dl className="ledger">
+            {!f.privateHorse&&<><dt>رسوم الإيواء</dt><dd>{amount(f.expected)} ر.س</dd><dt>المصروفات الأخرى على المالك</dt><dd>{amount(f.recoveredExpected)} ر.س</dd></>}
             <dt>استهلاك التغذية</dt>
             <dd>{amount(f.food)} ر.س</dd>
             <dt>المصروفات المشتركة والخاصة</dt>

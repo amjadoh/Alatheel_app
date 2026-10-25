@@ -21,6 +21,7 @@ import {
 } from "./periods";
 import { boardingTerms } from "./boarding";
 import { itemKey, similarItems } from "./inventory";
+import { accountingStart } from './accounting-boundary';
 export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
@@ -203,6 +204,67 @@ export function applyCommand(
   }
   if (financialActions.has(c.action)) closePeriods(s, today);
   switch (c.action) {
+    case 'finance.setup': {
+      ensure(a.role==='admin' && s.users.some(u=>u.id===a.uid && String(u.email).toLowerCase()==='amjadoh@gmail.com'),'تهيئة الحسابات للمدير الأساسي فقط');
+      const earliest=s.horses.filter(h=>h.status!=='private' && h.previousStatus!=='private' && h.entryDate).map(h=>date(h.entryDate)).sort()[0];
+      ensure(earliest && earliest===d.expectedStartDate,'تغير تاريخ أول خيل؛ راجع التهيئة');
+      const settings=s.settings[0]||(s.settings[0]={id:'general'});
+      ensure(!settings.accountingStartDate || settings.accountingStartDate===earliest,'بداية الحسابات مثبتة ولا تُغيّر تلقائيًا');
+      settings.accountingStartDate=earliest;settings.inventoryPurchasesFromExpenses=true;
+      settings.accountingConfiguredAt=now;
+      if(d.accrualPaymentId){
+        const p=find(s,'expensePayments',d.accrualPaymentId),e=find(s,'expenses',p.expenseId);
+        ensure(cashCategory(e)==='salary' && p.paidAt===d.expectedPaymentDate && p.amount===d.expectedPaymentAmount,'سجل بداية الراتب تغير');
+        ensure(!p.status || p.status==='paid' || p.classification==='accrual_start','السداد سبق تعديله');
+        if(p.classification!=='accrual_start'){
+          p.originalPayment=structuredClone(p);p.status='void';p.classification='accrual_start';
+          p.changeReason='هذا التاريخ بداية احتساب الراتب وليس عملية سداد، بتأكيد المدير الأساسي';p.updatedAt=now;p.updatedBy=a.uid;
+          e.accrualStartDate=date(p.paidAt);e.startMonth=e.accrualStartDate.slice(0,7);
+        }
+      }
+      break;
+    }
+    case 'finance.freeze-history': {
+      ensure(a.role==='admin' && s.users.some(u=>u.id===a.uid && String(u.email).toLowerCase()==='amjadoh@gmail.com'),'تثبيت السجل الافتتاحي للمدير الأساسي فقط');
+      const start=accountingStart(s);ensure(start,'حدد بداية الحسابات أولًا');
+      refreshPeriod(s,today);
+      const current=s.financialPeriods.find(p=>p.id===today.slice(0,7))!;
+      const oldIds=new Set(s.financialPeriods.filter(p=>p.closed).map(p=>p.id));
+      const first=start.slice(0,7);
+      if(first<today.slice(0,7)&&!oldIds.has(first))s.financialPeriods.push({id:first,closed:false,basis:structuredClone(current.basis),createdAt:now,basisStartedAt:start});
+      closePeriods(s,today);
+      for(const p of s.financialPeriods)if(p.closed&&!oldIds.has(p.id)){p.source='opening_history';p.reconstructedAt=now;p.reconstructionNote='تقرير افتتاحي مثبت من البيانات المسجلة المتاحة، دون اختلاق عمليات دفع أو استهلاك تاريخية';}
+      break;
+    }
+    case 'expense.start': {
+      ensure(a.role==='admin','تعديل بداية الاحتساب للمدير فقط');
+      const e=find(s,'expenses',id);ensure(e.frequency!=='once','المصروف غير متكرر');
+      const start=date(d.startDate);ensure(start<=today,'لا يمكن بدء الاحتساب بتاريخ مستقبلي');
+      const reason=required(d.reason,'سبب تعديل بداية الاحتساب');
+      e.accrualHistory=[...(e.accrualHistory||[]),{previousStartDate:e.accrualStartDate||e.startMonth||'',startDate:start,reason,at:now,by:a.uid}];
+      e.accrualStartDate=start;e.startMonth=start.slice(0,7);e.updatedAt=now;
+      break;
+    }
+    case 'expense.salary.settle-history': {
+      ensure(a.role==='admin' && s.users.some(u=>u.id===a.uid && String(u.email).toLowerCase()==='amjadoh@gmail.com'),'تسجيل السداد التاريخي للمدير الأساسي فقط');
+      const e=find(s,'expenses',id),start=accountingStart(s);ensure(start && cashCategory(e)==='salary' && e.frequency==='monthly','حدد الراتب الشهري وبداية الحسابات');
+      const through=required(d.through,'آخر شهر مسدد');monthlyExpense({id:'validate',cost:0},through);
+      ensure(through<=today.slice(0,7),'آخر شهر يتجاوز التاريخ الحالي');
+      let period=[start.slice(0,7),e.startMonth||start.slice(0,7)].sort().pop()!,count=0;
+      while(period<=through){
+        ensure(count++<120,'الفترة أطول من الحد المسموح');
+        const remaining=money(expensePlan(s,e,period)-expensePaid(s,id,period));
+        if(remaining>0){
+          const paidAt=[period+'-27',start,e.accrualStartDate||start].sort().pop()!;
+          ensure(paidAt<=today,'تاريخ سداد مستقبلي');assertOpenPeriod(s,paidAt);
+          const pid='salary-history-'+id+'-'+period;ensure(!s.expensePayments.some(p=>p.id===pid),'يوجد سداد تاريخي معدل لهذه الفترة؛ راجع السجل');
+          s.expensePayments.push({id:pid,expenseId:id,expenseName:e.name,amount:remaining,period,paidAt,status:'paid',cashCategory:'salary',expenseKind:'operating',notes:required(d.reason,'سبب التسجيل التاريخي'),performedBy:a.uid,createdAt:now,historicalSettlement:true});
+        }
+        period=nextMonth(period+'-01').slice(0,7);
+      }
+      e.lockedForPayments=true;
+      break;
+    }
     case "finance.rollover":
       break;
     case "owner.save": {
@@ -906,6 +968,7 @@ export function applyCommand(
         "المبلغ يتجاوز المتبقي لهذه الفترة؛ سجل التكلفة الإضافية كمصروف مستقل",
       );
       const paidAt = date(d.paidAt);
+      ensure(!accountingStart(s)||paidAt>=accountingStart(s),'تاريخ السداد يسبق بداية الحسابات');
       assertOpenPeriod(s, paidAt);
       ensure(paidAt <= today, "لا يمكن تسجيل سداد بتاريخ مستقبلي");
       const currentExpense = s.expenses.find((x) => x.id === id);
@@ -1213,6 +1276,7 @@ export function applyCommand(
     case "settings.save":
       ensure(a.role === "admin", "الإعدادات للمدير فقط");
       put(s, "settings", {
+        ...s.settings.find(x=>x.id==="main"),
         id: "main",
         stableName: required(d.stableName, "اسم الإسطبل"),
         phone: text(d.phone),
@@ -1223,7 +1287,7 @@ export function applyCommand(
     default:
       throw new Error("عملية غير معروفة");
   }
-  if (financialActions.has(c.action)) refreshPeriod(s, today);
+  if (financialActions.has(c.action)||["finance.setup","expense.start","expense.salary.settle-history"].includes(c.action)) refreshPeriod(s, today);
   s.activities.push({
     id: c.requestId,
     action: c.action,

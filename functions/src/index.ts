@@ -93,6 +93,10 @@ const needs: Record<string, Collection[]> = {
 };
 // Financial mutations and rollover must see one transactional basis.
 for (const action of [
+  "finance.setup",
+  "finance.freeze-history",
+  "expense.start",
+  "expense.salary.settle-history",
   "stock.purchase",
   "stock.purchase.correct",
   "stock.reconcile",
@@ -124,6 +128,7 @@ for (const action of [
       "expensePayments",
       "financialPeriods",
       "inventoryTransactions",
+      "settings",
     ]),
   ] as Collection[];
 needs["stock.move"] = ["horses", "mealTypes", "inventoryTransactions"];

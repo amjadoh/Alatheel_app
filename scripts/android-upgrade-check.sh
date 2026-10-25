@@ -25,13 +25,13 @@ install_checked() {
 install_checked previous/Alatheel-1.7.0.apk 1.7.0
 FIRST_ID="$(identity | grep 'uid:')"
 FIRST_TIME="$(identity | grep 'firstInstallTime=')"
-for pair in "previous/Alatheel-1.8.1.apk 1.8.1" "previous/Alatheel-1.9.0.apk 1.9.0" "previous/Alatheel-1.10.0.apk 1.10.0" "apk/app-release.apk 1.8.2"; do
+for pair in "previous/Alatheel-1.8.1.apk 1.8.1" "previous/Alatheel-1.9.0.apk 1.9.0" "previous/Alatheel-1.10.0.apk 1.10.0" "previous/Alatheel-1.10.1.apk 1.10.1" "apk/app-release.apk 1.8.2"; do
   read -r file version <<< "$pair"
   install_checked "$file" "$version"
   test "$FIRST_ID" = "$(identity | grep 'uid:')"
   test "$FIRST_TIME" = "$(identity | grep 'firstInstallTime=')"
 done
-printf "PASS: 1.7.0 -> 1.8.1 -> 1.9.0 -> 1.10.0 -> 1.8.2; UID and firstInstallTime retained without uninstall or data clear.\n" > android-qa/upgrade-result.txt
+printf "PASS: 1.7.0 -> 1.8.1 -> 1.9.0 -> 1.10.0 -> 1.10.1 -> 1.8.2; UID and firstInstallTime retained without uninstall or data clear.\n" > android-qa/upgrade-result.txt
 '''.replace('1.8.2', version))
 needle='printf \'Signed APK upgraded'
 # Add a full process stop/reopen before the final successful smoke result.

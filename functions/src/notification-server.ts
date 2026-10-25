@@ -332,6 +332,9 @@ export function notificationFunctions(
           current,
           riyadhClock(new Date().toISOString()).day,
         ).some((x) => x.key === a.key);
+      } else if(a.kind==="app_feedback") {
+        const feedback=await tx.get(db.doc("appFeedback/"+a.feedbackId));
+        relevant=feedback.exists&&feedback.data()?.syncState!=="draft"&&String(p.data()?.email).toLowerCase()==="amjadoh@gmail.com";
       } else if (a.kind === "app_update") {
         const current = await tx.get(db.doc("appUpdateState/current"));
         relevant = current.data()?.versionCode === a.versionCode;

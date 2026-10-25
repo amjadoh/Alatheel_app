@@ -9,11 +9,12 @@ const {businessDay}=require('../functions/lib/dates');
 async function main(){
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Emulator required');
  const app=initializeApp({projectId:'demo-alatheel'},'feedback-qa'),db=getFirestore(app);
- const {appFeedback}=feedbackFunctions(db,async request=>{if(!request.auth)throw new Error('Authentication required');});
+ const {appFeedback}=feedbackFunctions(db,async request=>{if(!request.auth)throw new Error('Authentication required');return {identity:{email:request.auth.uid==='feedback-admin'?'amjadoh@gmail.com':'manager@example.test'}};});
  const call=(data,uid='feedback-admin')=>appFeedback.run({data,auth:{uid,token:{}}});
  const base={role:'admin',membershipApproved:true,disabled:false,displayName:'مدير تجريبي'};
  try{
-  await db.doc('users/feedback-admin').set(base);
+  await db.doc('users/feedback-admin').set({...base,email:'amjadoh@gmail.com'});
+  await db.doc('users/feedback-manager').set({...base,email:'manager@example.test'});
   await db.doc('users/feedback-employee').set({...base,role:'employee'});
   await db.doc('users/feedback-owner').set({...base,role:'owner'});
   await db.doc('users/feedback-disabled').set({...base,disabled:true});
@@ -42,6 +43,12 @@ async function main(){
   await assert.rejects(()=>call({action:'retry',id:create.id}));
   await db.doc('appFeedback/'+create.id).update({syncState:'failed'});await call({action:'retry',id:create.id});
   assert.equal((await db.doc('appFeedback/'+create.id).get()).data().syncState,'queued');
+  await assert.rejects(()=>call({action:'status',id:create.id,status:'resolved'},'feedback-manager'));
+  await assert.rejects(()=>call({action:'download',id:create.id,file:0},'feedback-manager'));
+  await assert.rejects(()=>call({action:'status',id:create.id,status:'resolved'}));
+  await call({action:'status',id:create.id,status:'resolved',resolution:'تم إصلاح سبب البلاغ'});
+  const solved=(await db.doc('appFeedback/'+create.id).get()).data();assert.equal(solved.status,'resolved');assert.equal(solved.statusHistory.length,2);
+  assert.equal((await db.collection('users/feedback-admin/staffAlerts').get()).size,1);assert.equal((await db.collection('users/feedback-manager/staffAlerts').get()).size,0);
   console.log('PASS feedback callable authorization, exact file integrity, missing chunks, immutable uploads, retries, limits and idempotent submission');
  }finally{await deleteApp(app);}
 }

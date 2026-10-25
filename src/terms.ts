@@ -1,7 +1,7 @@
 export const TERMS = {
-  expectedBoarding: "رسوم الإيواء المتوقعة",
-  expectedOwnerTotal: "الإجمالي المتوقع من الملاك",
-  expectedOwnerAmount: "المتوقع من المالك",
+  expectedBoarding: "رسوم الإيواء",
+  expectedOwnerTotal: "رسوم الخدمات لهذا الشهر",
+  expectedOwnerAmount: "رسوم الخدمات",
   collectedAmounts: "المبالغ المحصلة",
   collection: "التحصيل",
   collectionDate: "تاريخ التحصيل",

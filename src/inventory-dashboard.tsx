@@ -11,16 +11,11 @@ export function InventoryDashboard({ needs }: { needs: InventoryNeeds }) {
   </section>;
 }
 
-export function InventoryRunwayPanel({ item, today, horizonEnd }: { item: ItemRunway; today: string; horizonEnd: string }) {
-  return <section className={`inventory-runway ${item.status === "shortage" ? "short" : ""}`} aria-label="توقع توفير الصنف">
-    <h3>متى تحتاج توفره؟</h3>
-    {item.incomplete ? <p className="notice small">{item.needsStockData ? "راجع كمية المخزون لتحديد موعد توفيره." : item.pendingIncomplete ? "أكمل مزامنة الاستهلاك السابق لتحديد الموعد." : item.needsUnitData ? "أكمل تحويل وحدة الصنف لتحديد الموعد بدقة." : item.needsQuantityData ? "أكمل كميات التغذية لتحديد الموعد بدقة." : "أكمل مواعيد التغذية لتحديد الموعد بدقة."}</p>
-      : item.needsProvidingDate ? <>
-        <div><span>{item.needsProvidingDate <= today ? "تحتاج توفره اليوم" : "تحتاج توفره في"}</span><strong>{displayDate(item.needsProvidingDate)}</strong></div>
-        {item.lastCoveredDate && item.lastCoveredDate >= today && <p className="small muted">يكفي حتى نهاية {displayDate(item.lastCoveredDate)}.</p>}
-      </> : item.status === "no_consumption" ? <p className="small muted">لا يوجد استهلاك مجدول لهذا الصنف خلال الفترة المحسوبة.</p>
-      : <p>الكمية تغطي الوجبات المسجلة حتى {displayDate(horizonEnd)}.</p>}
-    <p className="small muted">تقدير حسب الكمية وبرامج التغذية الحالية؛ يتحدث عند الشراء أو تعديل الاستهلاك.</p>
+export function InventoryRunwayPanel({ item, today, horizonEnd, name="الصنف" }: { item: ItemRunway; today: string; horizonEnd: string; name?:string }) {
+  const incomplete=item.incomplete,empty=item.emptyNow,covered=item.lastCoveredDate||horizonEnd;
+  return <section className={`inventory-runway ${incomplete||empty||item.stockoutDate&&item.stockoutDate<=today ? "short" : ""}`} aria-label="مدة توفر الصنف">
+    <h3>{incomplete?`أكمل بيانات ${name} لحساب مدة توفره`:empty?`${name} غير متوفر حاليًا`:item.status==="no_consumption"?`لا يوجد استهلاك مجدول لـ${name}`:item.stockoutDate&&item.stockoutDate<=today?`${name} لا يكفي كمية التغذية المجدولة اليوم`:<>{name} متوفر حتى {displayDate(covered)}{item.status==="beyond_horizon"?" على الأقل":""}</>}</h3>
+    <p className="small muted">حسب الكمية الحالية ومواعيد تغذية الخيل المسجلة.</p>
   </section>;
 }
 
@@ -30,7 +25,7 @@ export function InventoryItemNeeds({ item, end }: { item: ItemNeeds; end: string
     <div className="inventory-quantities"><div><span>المتوفر الآن</span><strong>{displayQuantity(item.stock)} <small>{item.unit}</small></strong></div><div><span>المطلوب حتى {displayDate(end)}</span><strong>{displayQuantity(item.remaining)} <small>{item.unit}</small></strong></div></div>
     <div className="inventory-coverage" role="progressbar" aria-label="تغطية احتياج التغذية" aria-valuenow={Math.round(coverage)} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${coverage}%` }}/></div>
     {item.pending > 0 && <p className="notice small">محجوز لخصم سابق لم يكتمل: {displayQuantity(item.pending)} {item.unit}. المتاح للاحتياج القادم: {displayQuantity(item.available)} {item.unit}.</p>}
-    <div className={`inventory-shortage ${item.shortage > 0 ? "short" : "enough"}`}><span>{item.shortage > 0 ? "الناقص للشراء" : item.unscheduled.length ? "لا نقص في المجدول" : "المتوقع بقاؤه بعد يوم 27"}</span><strong>{displayQuantity(item.shortage > 0 ? item.shortage : item.surplus)} {item.unit}</strong></div>
+    {item.shortage>0&&<div className="inventory-shortage short"><span>الناقص للشراء</span><strong>{displayQuantity(item.shortage)} {item.unit}</strong></div>}
     <details className="inventory-breakdown"><summary>التفاصيل واستهلاك الخيل</summary>
       <dl><div><dt>احتياج الدورة المجدول</dt><dd>{displayQuantity(item.cycleQuantity)} {item.unit}</dd></div>
       {item.conversion !== 1 && <div><dt>يعادل للشراء</dt><dd>{displayQuantity(item.purchaseQuantity)} {item.purchaseUnit}</dd></div>}

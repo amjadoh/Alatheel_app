@@ -1,3 +1,6 @@
+import { MonthlyDashboard as FinancialDashboard } from './monthly-dashboard';
+import { accountingStart } from '../functions/src/accounting-boundary';
+import './clear-light.css';
 import { TERMS } from "./terms";
 import { NotificationsPanel,useStaffNotifications } from "./notifications";
 import { displayAmount, displayNumber, displayQuantity, displayPrice, displayDate, displayMonth, isolateNumber, displayDateTime, displayIdentifier } from "./format";
@@ -71,7 +74,6 @@ import {
 import { exportExcel, exportPdf } from "./export";
 import { UpdateButton,useAppUpdate } from "./updates";
 import {
-  FinancialDashboard,
   HorseFinancialPanel,
   HorsePhoto,
 } from "./finance-ui";
@@ -206,6 +208,7 @@ export default function App() {
     [search, setSearch] = useState(""),
     [archived, setArchived] = useState(false),
     [horseFilter, setHorseFilter] = useState("all"),
+    [horseOwner, setHorseOwner] = useState("all"),
     [month, setMonth] = useState(today().slice(0, 7)),
     [incomeTab, setIncomeTab] = useState("pending"),
     [accountHorseId, setAccountHorseId] = useState<string | null>(null),
@@ -312,6 +315,7 @@ export default function App() {
     ),
     ["name", "ownerName"],
   ).filter((h) => {
+    if(isStaff && horseOwner!=="all" && (horseOwner==="private" ? h.status!=="private" : h.ownerName!==horseOwner))return false;
     if (!isStaff || horseFilter === "all") return true;
     const f = horseFinance(s, h, month);
     return horseFilter === "loss"
@@ -526,12 +530,12 @@ export default function App() {
           data: { ...d, currentStock: m?.currentStock || 0 },
         }),
       note: m
-        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. الرصيد وحركاته بوحدة الشراء. لمراجعة الموجود فعليًا استخدم «مطابقة الكمية الفعلية»؛ ولشراء جديد استخدم «شراء وإضافة». الخصم التلقائي لا يسجل مصروفًا ماليًا جديدًا."
-        : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «شراء وإضافة». لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
+        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. الرصيد وحركاته بوحدة الشراء. لمراجعة الموجود فعليًا استخدم «مطابقة الكمية الفعلية»؛ ولشراء جديد استخدم «شراء مخزون وسداد قيمته» من المصروفات. الخصم التلقائي لا يسجل مصروفًا ماليًا جديدًا."
+        : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «شراء مخزون وسداد قيمته» من المصروفات. لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
     });
   const purchase = (m: Row) =>
     setForm({
-      title: `شراء وإضافة · ${m.name}`,
+      title: `شراء مخزون · ${m.name}`,
       inventoryItem: m.id,
       fields: [
         {
@@ -615,7 +619,7 @@ export default function App() {
         },
       ],
       values: { amount: 1, type },
-      note: `الرصيد الحالي: ${displayQuantity(m.currentStock)} ${m.unit}. هذه حركة كمية إضافية فقط دون مبلغ مدفوع؛ لا تستخدمها لوجبة خُصمت تلقائيًا. للمشتريات استخدم شراء وإضافة.`,
+      note: `الرصيد الحالي: ${displayQuantity(m.currentStock)} ${m.unit}. هذه حركة كمية إضافية فقط دون مبلغ مدفوع؛ لا تستخدمها لوجبة خُصمت تلقائيًا. للمشتريات استخدم المصروفات ثم شراء مخزون وسداد قيمته.`,
       submit: (d) => execute({ action: "stock.move", id: m.id, data: d }),
     });
   const reconcileStock = (m: Row) =>
@@ -628,7 +632,7 @@ export default function App() {
       ],
       values: { actualQuantity: m.currentStock || 0, reason: "", activate: !m.autoFeedingFrom },
       note: m.autoFeedingFrom
-        ? "أدخل الموجود أمامك الآن. يسجل التطبيق فرق الجرد فقط ويكمل الخصم من الرصيد المصحح، دون مصروف أو سداد جديد. إذا كانت الزيادة من شراء فاستخدم «شراء وإضافة»."
+        ? "أدخل الموجود أمامك الآن. يسجل التطبيق فرق الجرد فقط ويكمل الخصم من الرصيد المصحح، دون مصروف أو سداد جديد. إذا كانت الزيادة من شراء فاستخدم «شراء مخزون وسداد قيمته» من المصروفات."
         : "أكد الموجود أمامك الآن لبدء الخصم التلقائي من الغد حسب خطط التغذية. لا يخصم التطبيق الأيام السابقة أو تغذية اليوم مرة أخرى. هذه مطابقة كمية فقط؛ لا تسجل مصروف شراء أو دفعة مالية.",
       submit: (d) => execute({ action: "stock.reconcile", id: m.id, data: d }),
     });
@@ -1085,6 +1089,7 @@ export default function App() {
   }, [opening, a?.uid]);
   const notifications = useStaffNotifications(a, target => {
     setDetail(null);setAccountMenuOpen(false);
+    if(target.page === "feedback"){setFeedbackOpen(true);return;}
     if(target.page === "update"){appUpdates.check();go("more");return;}
     if(target.page === "income" && target.horseId){const horse=s.horses.find(h=>h.id===target.horseId);if(horse){go("income");collect(horse);}}
     else {go("inventory");if(target.mealTypeId)setSearch(s.mealTypes.find(m=>m.id===target.mealTypeId)?.name || "");}
@@ -1161,7 +1166,7 @@ export default function App() {
     onLogout={authIssue || authPhase === "waiting" || authPhase === "blocked" ? () => void logout() : undefined}
   />;
   return (
-    <div className="app" dir="rtl">
+    <div className="app clear-light" dir="rtl">
       {!online && (
         <div className="offline" role="status">
           لا يوجد اتصال. تتطلب العمليات اتصالًا؛ أعد المحاولة بعد عودته.
@@ -1305,30 +1310,13 @@ export default function App() {
             )}
             {a.dataReady !== false && tab === "dashboard" && (
               <>
-                {heading(`مرحبًا، ${a.displayName}`)}
-                {isStaff && followUp && <div className="daily-follow-up">
-                  <TodayActions followUp={followUp}
-                    stockItems={s.mealTypes.filter(m => Number(m.currentStock) <= Number(m.minThreshold || 0) || (stockRunway?.items.some(i => i.id === m.id && !!i.needsProvidingDate && i.needsProvidingDate <= inventoryDay))).map(m => ({ id: m.id, name: m.name, message: Number(m.currentStock) <= 0 ? "الصنف نافد" : stockRunway?.items.some(i => i.id === m.id && i.needsProvidingDate === inventoryDay) ? "الكمية لا تكفي وجبات اليوم" : "وصل إلى حد التنبيه" }))}
-                    onHorse={id => { const h = s.horses.find(h => h.id === id); if (h) { go("income"); collect(h); } }}
-                    onInventory={id => { go("inventory"); setSearch(s.mealTypes.find(m => m.id === id)?.name || ""); }}
-                    onRequests={() => go("requests")}
-                  />
-                  <AccountReview followUp={followUp} onObservation={observation => {
-                    if (observation.entity === "horse") { const h=s.horses.find(h=>h.id===observation.id); if(h) horseForm(h); }
-                    else if (observation.entity === "meal") { const m=s.mealTypes.find(m=>m.id===observation.id); if(m) mealForm(m); }
-                    else if (observation.entity === "expense") { go("expenses"); setSearch(s.expenses.find(e=>e.id===observation.id)?.name || ""); }
-                    else if (isStaff) setDetail({ title: observation.name || "مراجعة الحسابات", content: <>
-                      <p>{observation.message}</p>
-                      {observation.code === "payable_history_incomplete" && <p>الفترات التي لا تتوفر لها حسابات محفوظة تحتاج مراجعة سجلاتها قبل اعتماد أرقامها. لا يعيد التطبيق حساب هذه الفترات أو تعديلها تلقائيًا.</p>}
-                    </> });
-                  }} />
-                  <CashForecast forecast={followUp.forecast} />
-                </div>}
+                {heading("الإسطبل في لمحة.")}
                 <label className="period">
                   الفترة{" "}
                   <input
                     type="month"
                     aria-label="شهر التقرير"
+                    min={accountingStart(s).slice(0,7)||undefined}
                     value={month}
                     onChange={(e) =>
                       setMonth(e.target.value || today().slice(0, 7))
@@ -1355,6 +1343,24 @@ export default function App() {
                     }
                   />
                 )}
+                {isStaff && followUp && <details className="daily-follow-up"><summary>المتابعة والمراجعة</summary>
+                  <TodayActions followUp={followUp}
+                    stockItems={s.mealTypes.filter(m => Number(m.currentStock) <= Number(m.minThreshold || 0) || (stockRunway?.items.some(i => i.id === m.id && !!i.needsProvidingDate && i.needsProvidingDate <= inventoryDay))).map(m => ({ id: m.id, name: m.name, message: Number(m.currentStock) <= 0 ? "الصنف نافد" : stockRunway?.items.some(i => i.id === m.id && i.needsProvidingDate === inventoryDay) ? "الكمية لا تكفي وجبات اليوم" : "وصل إلى حد التنبيه" }))}
+                    onHorse={id => { const h = s.horses.find(h => h.id === id); if (h) { go("income"); collect(h); } }}
+                    onInventory={id => { go("inventory"); setSearch(s.mealTypes.find(m => m.id === id)?.name || ""); }}
+                    onRequests={() => go("requests")}
+                  />
+                  <AccountReview followUp={followUp} onObservation={observation => {
+                    if (observation.entity === "horse") { const h=s.horses.find(h=>h.id===observation.id); if(h) horseForm(h); }
+                    else if (observation.entity === "meal") { const m=s.mealTypes.find(m=>m.id===observation.id); if(m) mealForm(m); }
+                    else if (observation.entity === "expense") { go("expenses"); setSearch(s.expenses.find(e=>e.id===observation.id)?.name || ""); }
+                    else if (isStaff) setDetail({ title: observation.name || "مراجعة الحسابات", content: <>
+                      <p>{observation.message}</p>
+                      {observation.code === "payable_history_incomplete" && <p>الفترات التي لا تتوفر لها حسابات محفوظة تحتاج مراجعة سجلاتها قبل اعتماد أرقامها. لا يعيد التطبيق حساب هذه الفترات أو تعديلها تلقائيًا.</p>}
+                    </> });
+                  }} />
+                  <CashForecast forecast={followUp.forecast} />
+                </details>}
                 {!isStaff && (
                   <>
                     <div className="dashboard-grid">
@@ -1577,6 +1583,7 @@ export default function App() {
                   <input
                     type="month"
                     aria-label="شهر حساب الخيل"
+                    min={accountingStart(s).slice(0,7)||undefined}
                     value={month}
                     onChange={(e) =>
                       setMonth(e.target.value || today().slice(0, 7))
@@ -1597,6 +1604,7 @@ export default function App() {
                     </select>
                   </label>
                 )}
+                {isStaff&&<label className="field"><span>حسب المالك</span><select aria-label="حسب المالك" value={horseOwner} onChange={e=>setHorseOwner(e.target.value)}><option value="all">جميع الملاك</option><option value="private">ملك الإسطبل</option>{[...new Set(s.horses.filter(h=>h.status!=="private").map(h=>h.ownerName).filter(Boolean))].map(name=><option key={name} value={name}>{name}</option>)}</select></label>}
                 {visibleHorseRows.map((h) => {
                   const f = horseFinance(s, h, month);
                   return (
@@ -1617,7 +1625,7 @@ export default function App() {
                         {isStaff && (
                           <div className="horse-finance-line">
                             {!f.privateHorse && <span>{TERMS.expectedOwnerAmount} {money(f.revenue)}</span>}
-                            <span>التكلفة {money(f.total)}</span>
+                            <span>التكلفة {money(f.total)}</span>{!f.privateHorse&&<><span>تم تحصيله {money(f.cash)}</span><span>المتبقي على المالك {money(f.outstanding)}</span></>}
                           </div>
                         )}
                         {isStaff && (
@@ -1787,14 +1795,14 @@ export default function App() {
                   <section className="card" key={m.id}>
                     <div className="spread">
                       <h2>{m.name}</h2>
-                      <span
+                      <span hidden={m.currentStock>m.minThreshold && stockNeeds.items.find(i=>i.id===m.id)!.shortage<=0 && !stockNeeds.items.find(i=>i.id===m.id)!.unscheduled.length}
                         className={`pill ${m.currentStock <= m.minThreshold || stockNeeds.items.find(i => i.id === m.id)!.shortage > 0 ? "red" : ""}`}
                       >
-                        {m.currentStock <= 0 ? "نافد" : stockNeeds.items.find(i => i.id === m.id)!.shortage > 0 ? "يحتاج شراء" : stockNeeds.items.find(i => i.id === m.id)!.unscheduled.length ? "مواعيد غير مكتملة" : m.currentStock <= m.minThreshold ? "منخفض" : "يكفي الفترة"}
+                        {m.currentStock <= 0 ? "نافد" : stockNeeds.items.find(i => i.id === m.id)!.shortage > 0 ? "يحتاج شراء" : stockNeeds.items.find(i => i.id === m.id)!.unscheduled.length ? "مواعيد غير مكتملة" : m.currentStock <= m.minThreshold ? "منخفض" : ""}
                       </span>
                     </div>
                     <InventoryItemNeeds item={stockNeeds.items.find(i => i.id === m.id)!} end={stockNeeds.end} />
-                    {stockRunway?.items.find(i => i.id === m.id) && <InventoryRunwayPanel item={stockRunway.items.find(i => i.id === m.id)!} today={inventoryDay} horizonEnd={stockRunway.horizonEnd} />}
+                    {stockRunway?.items.find(i => i.id === m.id) && <InventoryRunwayPanel name={m.name} item={stockRunway.items.find(i => i.id === m.id)!} today={inventoryDay} horizonEnd={stockRunway.horizonEnd} />}
                     <p className="muted">
                       حد التنبيه {displayQuantity(m.minThreshold)} · سعر وحدة الشراء{" "}
                       {displayPrice(m.pricePerUnit)} ر.س
@@ -1807,9 +1815,6 @@ export default function App() {
                     </p>
                     <p className="muted small">{m.autoFeedingFrom ? <>الخصم التلقائي مفعّل من {displayDate(m.autoFeedingFrom)}</> : "الخصم التلقائي غير مفعّل؛ أكد الموجود فعليًا أولًا"}</p>
                     <div className="actions">
-                      <Button kind="gold" onClick={() => purchase(m)}>
-                        شراء وإضافة
-                      </Button>
                       <Button kind="outline" onClick={() => reconcileStock(m)}>{m.autoFeedingFrom ? "مطابقة الكمية الفعلية" : "تأكيد الرصيد وتفعيل الخصم"}</Button>
                     </div>
                     <div className="text-actions">
@@ -2020,6 +2025,7 @@ export default function App() {
                     }
                   />
                 </label>
+                <section className="card stock-purchase-entry"><h2>شراء مخزون وسداد قيمته</h2><p className="small muted">اختر الصنف، ثم أدخل الكمية والمبلغ المدفوع وتاريخ الشراء. تُضاف الكمية ويُسجل السداد مرة واحدة.</p><div className="actions">{s.mealTypes.filter(m=>!m.archived).map(m=><Button key={m.id} kind="outline" onClick={()=>purchase(m)}>شراء {m.name}</Button>)}</div></section>
                 {expenseMonthClosed && (
                   <p className="notice">
                     هذا الشهر محفوظ؛ تظهر تفاصيل المصروفات وقت إغلاقه. يمكن
@@ -2092,6 +2098,7 @@ export default function App() {
                         ثانية.
                       </p>
                     )}
+                    {isAdmin&&e.frequency!=="once"&&<Button kind="outline" onClick={()=>setForm({title:"بداية احتساب المصروف",fields:[{name:"startDate",label:"تاريخ بداية الاحتساب",type:"date",required:true},{name:"reason",label:"سبب التعديل",type:"textarea",required:true}],values:{startDate:e.accrualStartDate||((e.startMonth||accountingStart(s).slice(0,7)||today().slice(0,7))+"-01"),reason:""},submit:d=>execute({action:"expense.start",id:e.id,data:d})})}>تعديل بداية الاحتساب</Button>}
                     {expenseMonthClosed ||
                     e.collectedHorseIds?.length > 0 ||
                     s.expensePayments.some((p) => p.expenseId === e.id) ? (
@@ -2615,7 +2622,7 @@ export default function App() {
         </Modal>
       )}
       {helpOpen && a && <Modal title="التعليمات" close={()=>setHelpOpen(false)}><HelpPanel role={a.role}/></Modal>}
-      {feedbackOpen && isAdmin && a?.dataReady && <Modal title="ملاحظات التطبيق" close={()=>{if(!busy)setFeedbackOpen(false);}}><FeedbackPanel actor={a} onBusy={setBusy}/></Modal>}
+      {feedbackOpen && isAdmin && a?.dataReady && <Modal title="بلاغات التطبيق" close={()=>{if(!busy)setFeedbackOpen(false);}}><FeedbackPanel primary={s.users.some(u=>u.id===a.uid&&String(u.email).toLowerCase()==="amjadoh@gmail.com")} actor={a} onBusy={setBusy}/></Modal>}
       {loginOpen && (
         <Modal title="أهلًا بك في الأثيل" close={() => setLoginOpen(false)}>
           <img className="login-logo" src="/logo.jpeg" alt="شعار الأثيل" />

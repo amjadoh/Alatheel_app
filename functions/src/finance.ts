@@ -1,3 +1,4 @@
+import { accountingView } from './accounting-boundary';
 import { money, nextMonth } from "./domain";
 import type { State, Row } from "./domain";
 import {
@@ -43,6 +44,7 @@ export function boardingPart(i: Row) {
   );
 }
 export function expensePaid(s: State, expenseId: string, period: string) {
+  s=accountingView(s);
   return money(
     s.expensePayments
       .filter(
@@ -62,14 +64,16 @@ export function expensePlan(s: State, expense: Row, period: string) {
 }
 /** Historic definitions stay frozen; later settlements remain visible in the payable ledger. */
 export function expensePeriodState(s: State, period: string): State {
+  s=accountingView(s);
   const basis = s.financialPeriods?.find(
     (p) => p.id === period && p.closed,
   )?.basis;
   return basis
-    ? { ...s, ...basis, expensePayments: s.expensePayments, income: s.income }
+    ? accountingView({ ...s, ...basis, expensePayments: s.expensePayments, income: s.income })
     : s;
 }
 export function horseFinance(s: State, h: Row, month: string) {
+  s=accountingView(s); h=s.horses.find(x=>x.id===h.id)||h;
   const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);
   if (closed) {
     const row = closed.summary.horses.find((r: Row) => r.id === h.id);
@@ -229,6 +233,7 @@ function calculateHorseFinance(s: State, h: Row, month: string) {
   };
 }
 export function financialSummary(s: State, month: string) {
+  s=accountingView(s);
   const closed = s.financialPeriods?.find((p) => p.id === month && p.closed);
   if (closed) return closed.summary as ReturnType<typeof calculateSummary>;
   return calculateSummary(s, month);

@@ -232,7 +232,7 @@ service cloud.firestore {
     }
     match /memberInvitations/{invitationId} { allow read, write: if false; }
     match /appFeedback/{feedbackId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() && (request.auth.token.email.lower() == 'amjadoh@gmail.com' || resource.data.createdBy == request.auth.uid);
       allow write: if false;
       match /{nested=**} { allow read, write: if false; }
     }

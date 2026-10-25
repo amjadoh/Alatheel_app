@@ -17,7 +17,8 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
     return bytes;
   }
   const appFeedback = onCall({ region: "us-central1", maxInstances: 3, memory: "512MiB", timeoutSeconds: 120 }, async request => {
-    await verifiedGoogle(request);
+    const {identity}=await verifiedGoogle(request);
+    const primary=String(identity.email||" ").toLowerCase()==="amjadoh@gmail.com";
     const user = await db.doc("users/" + request.auth!.uid).get();
     check(user.exists && user.data()?.role === "admin" && user.data()?.membershipApproved === true && !user.data()?.disabled, "ملاحظات التطبيق للمدير فقط");
     const { action, id, ...data } = request.data || {};
@@ -27,7 +28,7 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
       const manifest = feedbackManifest(data), fingerprint = digest(JSON.stringify(manifest));
       await db.runTransaction(async tx => {
         const old = await tx.get(ref);
-        if (old.exists) { check(old.data()?.fingerprint === fingerprint && old.data()?.createdBy === request.auth!.uid, "معرف ملاحظة مستخدم"); return; }
+        if (old.exists) { check((old.data()?.fingerprint === fingerprint || (!old.data()?.title && old.data()?.fingerprint===digest(JSON.stringify({text:manifest.text,files:manifest.files,version:manifest.version})))) && old.data()?.createdBy === request.auth!.uid, "معرف ملاحظة مستخدم"); return; }
         const usage = db.doc("feedbackUsage/" + request.auth!.uid + "_" + businessDay(now));
         const quota = await tx.get(usage);
         check(Number(quota.data()?.count || 0) < 15, "وصلت إلى حد الملاحظات اليوم؛ تابع الملاحظات السابقة أو حاول غدًا");
@@ -39,6 +40,7 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
       return { ok: true, syncState: (await ref.get()).data()?.syncState };
     }
     const snap = await ref.get(); check(snap.exists, "الملاحظة غير موجودة"); const note = snap.data()!;
+    check(primary||note.createdBy===request.auth!.uid,"هذا البلاغ يخص مديرًا آخر");
     if (action === "upload") {
       check(note.createdBy === request.auth!.uid && note.syncState === "draft", "لا يمكن تغيير مرفقات الملاحظة المرسلة");
       const file = note.files?.[data.file];
@@ -59,15 +61,23 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
       check(note.createdBy === request.auth!.uid, "لا يمكن إرسال مسودة مدير آخر");
       if (note.syncState !== "draft") return { ok: true, queued: true };
       for (const file of note.files || []) await fileBytes(id, file);
+      const primaryUsers=await db.collection("users").where("email","==","amjadoh@gmail.com").get();
       await db.runTransaction(async tx => {
         const current = await tx.get(ref);
-        if (current.data()?.syncState === "draft") tx.update(ref, { syncState: "queued", submittedAt: now });
+        if (current.data()?.syncState === "draft") {
+          tx.update(ref, { syncState: "queued", submittedAt: now });
+          for(const admin of primaryUsers.docs)if(admin.data().role==="admin"&&!admin.data().disabled&&admin.data().membershipApproved===true)
+            tx.create(admin.ref.collection("staffAlerts").doc(digest("feedback_"+id).slice(0,40)),{key:"feedback_"+id,kind:"app_feedback",title:"بلاغ جديد على التطبيق",body:note.createdByName+" · "+(note.title||String(note.text||"").slice(0,100)),page:"feedback",feedbackId:id,userId:admin.id,read:false,createdAt:now,deliveryState:"pending"});
+        }
       });
       return { ok: true, queued: true };
     }
     if (action === "status") {
       check(["new", "discussion", "resolved"].includes(data.status), "حالة الملاحظة غير صحيحة");
-      await ref.update({ status: data.status, updatedAt: now, updatedBy: request.auth!.uid });
+      check(primary,"تحديث حالة البلاغ للمدير الأساسي فقط");
+      const resolution=String(data.resolution||"").trim().slice(0,2000);
+      check(data.status!=="resolved"||resolution,"اكتب ملاحظة الحل");
+      await db.runTransaction(async tx=>{const current=await tx.get(ref);const old=current.data()!;tx.update(ref,{status:data.status,resolution,updatedAt:now,updatedBy:request.auth!.uid,statusHistory:[...(old.statusHistory||[]),{from:old.status,to:data.status,resolution,at:now,by:request.auth!.uid}]});});
       return { ok: true };
     }
     if (action === "retry") {

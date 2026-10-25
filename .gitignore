@@ -21,3 +21,8 @@ service-account*.json
 downloads-hosting/
 qa-results/
 android-qa/
+
+work/
+**/__pycache__/
+*.pyc
+android-upgrade-generated.sh

@@ -20,7 +20,7 @@ export function feedbackManifest(input: any) {
   check(text || files.length, "اكتب ملاحظة أو أرفق ملفًا");
   check(files.reduce((n: number, f: any) => n + f.size, 0) <= FEEDBACK_LIMITS.totalBytes, "إجمالي المرفقات يجب ألا يتجاوز 20 ميجابايت");
   check(/^\d+\.\d+\.\d+$/.test(String(input.version)), "إصدار التطبيق غير صحيح");
-  return { text, files, version: String(input.version) };
+  return { title:String(input.title||text.split("\n")[0]||"بلاغ مرفقات").trim().slice(0,160),text, files, version: String(input.version) };
 }
 export function validateBridgeClaims(claims: any, now = Date.now()) {
   const seconds = Math.floor(now / 1000);
