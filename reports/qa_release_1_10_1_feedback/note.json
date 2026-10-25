@@ -1,0 +1,27 @@
+{
+  "id": "qa_release_1_10_1_feedback",
+  "text": "[اختبار الإصدار 1.10.1] التحقق من رفع ملاحظات التطبيق والصور والمرفقات تلقائيًا. بيانات اختبار فقط، ولا تحتاج إجراءً من المدير.",
+  "files": [
+    {
+      "index": 0,
+      "name": "release-qa.png",
+      "extension": "png",
+      "size": 3093,
+      "sha256": "b08b9a9589681da43c27fb80a2eb2463743c4ca4a3b83c2b55812f043a602e21",
+      "mime": "image/png",
+      "chunks": 1
+    },
+    {
+      "index": 1,
+      "name": "release-qa.txt",
+      "extension": "txt",
+      "size": 92,
+      "sha256": "5b87631b9ad054182a9c8d2da9834546544d624b13a7651718279e306a15ea53",
+      "mime": "text/plain",
+      "chunks": 1
+    }
+  ],
+  "version": "1.10.1",
+  "createdByName": "اختبار إصدار الأثيل",
+  "createdAt": "2026-10-25T12:20:41.936Z"
+}
