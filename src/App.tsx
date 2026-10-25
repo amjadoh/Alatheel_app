@@ -760,10 +760,10 @@ export default function App() {
           },
         }),
     });
-  const payExpense = (e: Row) => {
+  const payExpense = (e: Row, period=month) => {
     const remaining =
       Math.round(
-        (expensePlan(s, e, month) - expensePaid(s, e.id, month)) * 100,
+        (expensePlan(s, e, period) - expensePaid(s, e.id, period)) * 100,
       ) / 100;
     setForm({
       title: `سداد ${e.name}`,
@@ -787,10 +787,10 @@ export default function App() {
       values: {
         amount: remaining,
         paidAt: today(),
-        period: month,
+        period,
         expectedRemaining: remaining,
       },
-      note: `سداد يخص مصروف ${month}. المتبقي ${money(remaining)} ريال. يظهر في الحركة النقدية حسب تاريخ سداد المصروف.`,
+      note: `سداد يخص مصروف ${period}. المتبقي ${money(remaining)} ريال. يظهر في الحركة النقدية حسب تاريخ سداد المصروف.`,
       submit: (d) => execute({ action: "expense.pay", id: e.id, data: d }),
     });
   };
@@ -1325,6 +1325,7 @@ export default function App() {
                 </label>
                 {isStaff && (
                   <FinancialDashboard
+                    onPayExpense={(id,period)=>{const e=expensePeriodState(s,period).expenses.find(e=>e.id===id);if(e)payExpense(e,period);}}
                     state={s}
                     month={month}
                     onGo={go}
