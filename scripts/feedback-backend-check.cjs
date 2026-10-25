@@ -1,7 +1,9 @@
 // Isolated Firestore emulator only. Actual callable handler, files and transactions.
 const assert=require('node:assert/strict'),crypto=require('node:crypto'),path=require('node:path');
-const {initializeApp,deleteApp}=require('../functions/node_modules/firebase-admin/app');
-const {getFirestore}=require('../functions/node_modules/firebase-admin/firestore');
+const {createRequire}=require('node:module');
+const backend=createRequire(path.resolve(__dirname,'../functions/package.json'));
+const {initializeApp,deleteApp}=backend('firebase-admin/app');
+const {getFirestore}=backend('firebase-admin/firestore');
 const {feedbackFunctions}=require('../functions/lib/feedback-server');
 const {businessDay}=require('../functions/lib/dates');
 async function main(){
