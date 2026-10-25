@@ -26,7 +26,11 @@ export function validateBridgeClaims(claims: any, now = Date.now()) {
   const seconds = Math.floor(now / 1000);
   check(claims.iss === "https://token.actions.githubusercontent.com" && claims.aud === BRIDGE_AUDIENCE, "Invalid issuer or audience");
   check(claims.repository === FEEDBACK_REPO && String(claims.repository_id) === "1418505579" && String(claims.repository_owner_id) === "341951948", "Wrong repository");
-  check(claims.repository_visibility === "private" && claims.ref === "refs/heads/main" && claims.sub === "repo:amjadoh/Alatheel_app:ref:refs/heads/main", "Wrong repository context");
+  const allowedSubjects = new Set([
+    "repo:amjadoh/Alatheel_app:ref:refs/heads/main",
+    "repo:amjadoh@341951948/Alatheel_app@1418505579:ref:refs/heads/main",
+  ]);
+  check(claims.repository_visibility === "private" && claims.ref === "refs/heads/main" && allowedSubjects.has(claims.sub), "Wrong repository context");
   check(claims.workflow_ref === FEEDBACK_REPO + "/.github/workflows/feedback-sync.yml@refs/heads/main", "Wrong workflow");
   check(["schedule", "workflow_dispatch"].includes(claims.event_name), "Wrong event");
   check(Number.isFinite(claims.exp) && claims.exp > seconds && claims.exp <= seconds + 900 && Number.isFinite(claims.nbf) && claims.nbf <= seconds + 30, "Expired or premature token");

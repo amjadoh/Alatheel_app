@@ -34,17 +34,8 @@ def identity():
     return _identity[0]
 
 def bridge(action, **data):
-    token = identity()
-    try:
-        return request(BRIDGE, "POST", {"action": action, **data}, {"X-Alatheel-Workflow-Token": token})
-    except urllib.error.HTTPError as error:
-        if error.code == 401:
-            payload = token.split(".")[1]
-            claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-            # Repository context only. Never log the token, signature, or other credentials.
-            print("Workflow context:", json.dumps({key: str(claims.get(key, ""))[:240] for key in
-                ["repository_visibility", "repository_id", "repository_owner_id", "ref", "sub", "workflow_ref"]}))
-        raise
+    return request(BRIDGE, "POST", {"action": action, **data}, {"X-Alatheel-Workflow-Token": identity()})
+
 
 def ensure_branch():
     try:

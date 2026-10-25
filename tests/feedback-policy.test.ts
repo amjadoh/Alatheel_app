@@ -30,3 +30,10 @@ test("a real RSA signature is required; changed payload, algorithm and missing s
   await assert.rejects(()=>verifyBridgeToken(encode({alg:"none",kid:"test"})+"."+encode(claims)+".",async()=>keys.publicKey,now));
   await assert.rejects(()=>verifyBridgeToken("a.b",async()=>keys.publicKey,now));
 });
+
+test("GitHub immutable-ID subject is accepted only for the pinned private repository and main branch",()=>{
+  const sub="repo:amjadoh@341951948/Alatheel_app@1418505579:ref:refs/heads/main";
+  assert.equal(validateBridgeClaims({...claims,sub},now),"123456:1");
+  for(const bad of [sub.replace("341951948","4"),sub.replace("1418505579","4"),sub.replace("refs/heads/main","refs/heads/other"),sub.replace("amjadoh@","attacker@")])
+    assert.throws(()=>validateBridgeClaims({...claims,sub:bad},now));
+});

@@ -36,6 +36,14 @@ wait_ready() {
 }
 for sample in 1 2 3 4 5; do
   adb shell am force-stop com.alatheel.stable
+  # Android may acknowledge force-stop before the old process has fully exited.
+  # Starting during that window can make ActivityManager cancel the new process.
+  STOPPED=false
+  for attempt in $(seq 1 60); do
+    if ! adb shell pidof com.alatheel.stable >/dev/null 2>&1; then STOPPED=true; break; fi
+    sleep 0.25
+  done
+  test "$STOPPED" = true
   adb logcat -c
   STARTED=$(date +%s%3N)
   adb shell am start -W -n com.alatheel.stable/.MainActivity > "android-qa/startup/cold-$sample-activity.txt"
