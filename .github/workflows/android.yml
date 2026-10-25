@@ -47,6 +47,10 @@ jobs:
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
         run: node scripts/ui-check.cjs
+      - name: Verify Arabic mobile instructions and navigation
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/help-check.cjs
       - name: Verify saved Google session continuity without production accounts
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui

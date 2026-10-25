@@ -107,7 +107,7 @@ async function main() {
             layout.closeSize >= 44,
         );
         assert.deepEqual(layout.headings, [
-          "💬 ملاحظات التطبيق", "📦 المخزون — كيف تسجل الكمية والمبلغ؟", "💳 التحصيل وكشف حساب الخيل",
+          "📖 التعليمات", "💬 ملاحظات التطبيق", "📦 المخزون — كيف تسجل الكمية والمبلغ؟", "💳 التحصيل وكشف حساب الخيل",
         ]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),

@@ -30,6 +30,7 @@ import {
   History,
   ShieldCheck,
   MessageSquareText,
+  BookOpen,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { App as NativeApp } from "@capacitor/app";
@@ -51,6 +52,7 @@ import {
 } from "./service";
 import { HorseAccount, ReceiptDetails } from "./account-ui";
 import { FeedbackLauncher, FeedbackPanel } from "./feedback";
+import { HelpPanel } from "./help";
 import { horseAccount } from "../functions/src/accounts";
 import { receiptCash } from "../functions/src/receipt-cash";
 import { financialSummary } from "../functions/src/finance";
@@ -211,6 +213,7 @@ export default function App() {
     [loginOpen, setLoginOpen] = useState(false),
     [accountMenuOpen, setAccountMenuOpen] = useState(false),
     [feedbackOpen, setFeedbackOpen] = useState(false),
+    [helpOpen, setHelpOpen] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
   const closeRelease = () => {
     markReleaseNotesRead(localStorage);
@@ -241,6 +244,7 @@ export default function App() {
           setAccountHorseId(null);
           setAccountMenuOpen(false);
           setFeedbackOpen(false);
+          setHelpOpen(false);
           prevUid.current = actor?.uid || null;
         }
       }),
@@ -263,6 +267,7 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const handle = NativeApp.addListener("backButton", () => {
+      if (helpOpen) { setHelpOpen(false); return; }
       if (feedbackOpen) { if (!busy) setFeedbackOpen(false); return; }
       if (releaseOpen) closeRelease();
       else if (accountMenuOpen) setAccountMenuOpen(false);
@@ -275,7 +280,7 @@ export default function App() {
     return () => {
       void handle.then((h) => h.remove());
     };
-  }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen, feedbackOpen, busy]);
+  }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen, feedbackOpen, helpOpen, busy]);
   const stockNeeds = useMemo(() => inventoryNeeds(s, inventoryDay), [s, inventoryDay]);
   const followUp = useMemo(() => a?.dataReady && staff(a) ? operationalFollowUp(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
   const stockRunway = useMemo(() => a?.dataReady && staff(a) ? inventoryRunway(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
@@ -1207,6 +1212,7 @@ export default function App() {
           />
           <nav className="account-popover" aria-label="المزيد وخيارات الحساب" onKeyDown={e=>{if(e.key==="Escape")setAccountMenuOpen(false);}}>
             <div className="account-menu-profile"><span className="account-profile-avatar">{a.photoURL ? <img src={a.photoURL} alt="" referrerPolicy="no-referrer"/> : a.displayName.charAt(0)}</span><div><strong><bdi dir="auto">{a.displayName}</bdi></strong><small>{roles[a.role]}</small></div><button className="account-close" aria-label="إغلاق القائمة" onClick={()=>setAccountMenuOpen(false)}><X size={18}/></button></div>
+            <button onClick={()=>{setAccountMenuOpen(false);setHelpOpen(true);}}><BookOpen size={18}/><span>التعليمات</span><ChevronLeft size={16}/></button>
             {isStaff && <button onClick={()=>go("owners")}><Users size={18}/><span>سجل الملاك</span><ChevronLeft size={16}/></button>}
             {isStaff && <button onClick={()=>go("requests")}><ClipboardList size={18}/><span>طلبات تسجيل الخيل</span><ChevronLeft size={16}/></button>}
             {isAdmin && <button onClick={()=>go("members")}><Users size={18}/><span>الأعضاء والصلاحيات</span><ChevronLeft size={16}/></button>}
@@ -2532,7 +2538,7 @@ export default function App() {
           </div>
         )}
       </main>
-      <FeedbackLauncher visible={!!isAdmin && a?.dataReady === true && !feedbackOpen && !form && !detail && !accountHorseId && !releaseOpen && !accountMenuOpen && !busy} onOpen={()=>setFeedbackOpen(true)}/>
+      <FeedbackLauncher visible={!!isAdmin && a?.dataReady === true && !feedbackOpen && !helpOpen && !form && !detail && !accountHorseId && !releaseOpen && !accountMenuOpen && !busy} onOpen={()=>setFeedbackOpen(true)}/>
       {a && (
         <nav className="bottom-nav" aria-label="التنقل الرئيسي">
           {nav.map(([key, label, Icon]) => {
@@ -2589,6 +2595,7 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {helpOpen && a && <Modal title="التعليمات" close={()=>setHelpOpen(false)}><HelpPanel role={a.role}/></Modal>}
       {feedbackOpen && isAdmin && a?.dataReady && <Modal title="ملاحظات التطبيق" close={()=>{if(!busy)setFeedbackOpen(false);}}><FeedbackPanel actor={a} onBusy={setBusy}/></Modal>}
       {loginOpen && (
         <Modal title="أهلًا بك في الأثيل" close={() => setLoginOpen(false)}>
