@@ -62,3 +62,6 @@
 @media(prefers-reduced-motion:reduce){.clear-light .button,.clear-light .stat,.clear-light .coverage-strip>span{transition:none}.clear-light .button:active,.clear-light .stat:active{transform:none}}
 
 .clear-light .feedback-full-image{display:block;width:100%;height:auto;border-radius:14px;margin:12px 0}
+
+.clear-light .bottom-nav button.active{background:var(--gold-soft);color:var(--gold);border-radius:12px}
+.clear-light .bottom-nav button.active:before{display:none}

@@ -1117,7 +1117,7 @@ export default function App() {
           ["more", "حسابي", Users],
         ];
   const titles: Record<string, string> = {
-    dashboard: "كل شيء، تحت نظرك.",
+    dashboard: "الإسطبل في لمحة.",
     horses: isStaff ? "الخيل." : "خيلي.",
     inventory: "المخزون.",
     income: "التحصيل.",
@@ -1233,7 +1233,7 @@ export default function App() {
             {isStaff && <button onClick={()=>go("owners")}><Users size={18}/><span>سجل الملاك</span><ChevronLeft size={16}/></button>}
             {isStaff && <button onClick={()=>go("requests")}><ClipboardList size={18}/><span>طلبات تسجيل الخيل</span><ChevronLeft size={16}/></button>}
             {isAdmin && <button onClick={()=>go("members")}><Users size={18}/><span>الأعضاء والصلاحيات</span><ChevronLeft size={16}/></button>}
-            {isAdmin && <button onClick={()=>{setAccountMenuOpen(false);setFeedbackOpen(true);}}><MessageSquareText size={18}/><span>ملاحظات التطبيق</span><ChevronLeft size={16}/></button>}
+            {isAdmin && <button onClick={()=>{setAccountMenuOpen(false);setFeedbackOpen(true);}}><MessageSquareText size={18}/><span>بلاغات التطبيق</span><ChevronLeft size={16}/></button>}
             <button onClick={()=>go("notifications")}><Bell size={18}/><span>الإشعارات</span><ChevronLeft size={16}/></button>
             <button onClick={()=>go("activity")}><History size={18}/><span>سجل العمليات</span><ChevronLeft size={16}/></button>
             <button onClick={()=>go("more")}><SlidersHorizontal size={18}/><span>بيانات حسابي والإعدادات</span><ChevronLeft size={16}/></button>
@@ -1310,7 +1310,7 @@ export default function App() {
             )}
             {a.dataReady !== false && tab === "dashboard" && (
               <>
-                {heading("الإسطبل في لمحة.")}
+                {heading("متابعة الإسطبل")}
                 <label className="period">
                   الفترة{" "}
                   <input
