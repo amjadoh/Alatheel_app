@@ -69,6 +69,7 @@ const needs: Record<string, Collection[]> = {
   "meal.delete": ["mealTypes", "horses"],
   "stock.move": ["mealTypes"],
   "stock.purchase": ["mealTypes"],
+  "stock.purchase.correct": ["mealTypes", "inventoryTransactions", "expenses", "expensePayments"],
   "stock.reconcile": ["mealTypes", "horses", "inventoryTransactions"],
   "feeding.skip": ["horses", "mealTypes", "inventoryTransactions"],
   "expense.save": ["expenses", "horses", "mealTypes", "expensePayments"],
@@ -93,6 +94,7 @@ const needs: Record<string, Collection[]> = {
 // Financial mutations and rollover must see one transactional basis.
 for (const action of [
   "stock.purchase",
+  "stock.purchase.correct",
   "stock.reconcile",
   "feeding.skip",
   "finance.rollover",

@@ -47,6 +47,10 @@ jobs:
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
         run: node scripts/ui-check.cjs
+      - name: Verify purchase corrections without duplicate expenses or payments
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/purchase-correction-check.cjs
       - name: Verify Arabic mobile instructions and navigation
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui

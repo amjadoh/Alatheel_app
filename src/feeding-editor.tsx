@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { feedingMeasure, feedingUnitPrice, scheduledFeedingDates } from "../functions/src/feeding";
 import type { Row } from "../functions/src/domain";
 import { displayAmount, displayDate, displayMonth, displayNumber, displayQuantity } from "./format";
@@ -37,6 +38,7 @@ export function FeedingPlanSummary({ plan, meal, month }: { plan: any; meal: Row
 }
 
 export function FeedingEditor({ plans, meals, month, onChange }: { plans: any[]; meals: Row[]; month: string; onChange: (plans: any[]) => void }) {
+  const [multipleModes, setMultipleModes] = useState<Record<number,boolean>>({});
   return <fieldset className="feeding-editor">
     <legend>برنامج التغذية</legend>
     <p className="muted small">حدد كمية اليوم، أو كمية المرة ومواعيدها بالشهر. يبدأ خصم المخزون بعد تأكيد رصيده وتفعيل الخصم للصنف. الشراء يسجل مدفوعاته مرة واحدة، وخصم التغذية حركة كمية فقط.</p>
@@ -45,10 +47,12 @@ export function FeedingEditor({ plans, meals, month, onChange }: { plans: any[];
       const meal = meals.find((item) => item.id === plan.mealTypeId) || { id: "", name: "" };
       const monthly = plan.frequency === "monthly";
       const legacy = monthly && !Array.isArray(plan.schedule);
-      const count = Number(plan.timesPerMonth || 1);
-      const mode = monthly ? count === 1 ? "once" : "monthly" : "daily";
+      const count = Number(plan.timesPerMonth ?? 1);
+      const multiple = multipleModes[i] ?? count !== 1;
+      const mode = monthly ? multiple ? "monthly" : "once" : "daily";
       const dates = !legacy && !feedingFormError([plan]) ? scheduledFeedingDates(plan, month) : [];
       const setCount = (raw: string | number) => {
+        setMultipleModes(current=>({...current,[i]:true}));
         const next = Number(raw);
         change({ timesPerMonth: raw, schedule: Number.isInteger(next) && next >= 1 && next <= 28 ? Array.from({ length: next }, (_, slot) => plan.schedule?.[slot] || blankSlot()) : [] });
       };
@@ -59,6 +63,7 @@ export function FeedingEditor({ plans, meals, month, onChange }: { plans: any[];
           {meals.map((item) => <option key={item.id} value={item.id}>{item.name} ({feedingMeasure(item).unit})</option>)}
         </select></label>
         <label className="field"><span>التكرار</span><select aria-label={`تكرار التغذية ${i + 1}`} value={mode} onChange={(e) => {
+          setMultipleModes(current=>({...current,[i]:e.target.value === "monthly"}));
           if (e.target.value === "daily") change({ frequency: "daily", timesPerMonth: undefined, schedule: undefined });
           else {
             const next = e.target.value === "once" ? 1 : Math.max(2, Math.min(28, count));
@@ -66,7 +71,7 @@ export function FeedingEditor({ plans, meals, month, onChange }: { plans: any[];
           }
         }}><option value="daily">يوميًا</option><option value="once">مرة بالشهر</option><option value="monthly">عدة مرات بالشهر</option></select></label>
         <label className="field"><span>{monthly ? "الكمية في المرة" : "إجمالي كمية اليوم"} ({feedingMeasure(meal).unit})</span><input type="number" min="0.001" step="0.001" required aria-label={`كمية التغذية ${i + 1}`} value={plan.quantity} onChange={(e) => change({ quantity: e.target.value })} /></label>
-        {monthly && count !== 1 && <label className="field"><span>عدد المرات بالشهر</span><input type="number" min="2" max={legacy ? "1000" : "28"} step="1" required aria-label={`عدد مرات التغذية ${i + 1}`} value={plan.timesPerMonth ?? ""} onChange={(e) => setCount(e.target.value)} /></label>}
+        {monthly && multiple && <label className="field"><span>عدد المرات بالشهر</span><input type="number" min="2" max={legacy ? "1000" : "28"} step="1" required aria-label={`عدد مرات التغذية ${i + 1}`} value={plan.timesPerMonth ?? ""} onChange={(e) => setCount(e.target.value)} /></label>}
         {legacy ? <div className="notice warning small"><p>هذه خطة سابقة دون أيام محددة. لا يخصم المخزون لها تلقائيًا حتى تحدد المواعيد. تظل الكمية والتكلفة التقديرية محفوظتين.</p><button type="button" className="button outline" onClick={() => setCount(Math.max(1, Math.min(28, count)))}>تحديد مواعيد الخصم</button></div> : monthly && <div className="feeding-slots">
           <p className="small muted">اختر اليوم وترتيبه داخل الشهر لكل موعد؛ مثال: السبت الأول والسبت الثالث. أول أربعة تكرارات متاحة دائمًا في كل شهر.</p>
           {(plan.schedule || []).map((slot: any, j: number) => {
@@ -79,7 +84,7 @@ export function FeedingEditor({ plans, meals, month, onChange }: { plans: any[];
           })}
         </div>}
         {!!dates.length && <div className="notice small" aria-live="polite"><b>معاينة شهر كامل · {displayMonth(month)}</b><p>{displayNumber(dates.length)} {monthly ? "مرة" : "يومًا"} · استهلاك {displayQuantity(dates.length * Number(plan.quantity || 0))} {feedingMeasure(meal).unit} · تكلفة تقديرية {displayAmount(dates.length * Number(plan.quantity || 0) * feedingUnitPrice(meal))} ر.س</p>{monthly && <p>المواعيد: {dates.map(displayDate).join("، ")}</p>}<p className="muted">الخصم الفعلي يراعي أيام الإقامة، تاريخ تفعيل الصنف والوجبات المتخطاة.</p></div>}
-        <button type="button" className="button outline" onClick={() => onChange(plans.filter((_, j) => i !== j))}>إزالة الصنف</button>
+        <button type="button" className="button outline" onClick={() => {setMultipleModes(current=>Object.fromEntries(Object.entries(current).filter(([key])=>Number(key)!==i).map(([key,value])=>[Number(key)>i?Number(key)-1:Number(key),value])));onChange(plans.filter((_, j) => i !== j));}}>إزالة الصنف</button>
       </div>;
     })}
     <button type="button" className="button outline" disabled={!meals.length} onClick={() => onChange([...plans, { mealTypeId: meals[0]?.id, quantity: 1, frequency: "daily" }])}>إضافة نوع تغذية</button>

@@ -195,7 +195,7 @@ export function costs(s: State, month: string) {
   // A recurring feed budget is covered by actual purchase invoices for that item.
   // Count the higher of the budget and invoices, never both on top of each other.
   const purchaseGroups = new Map<string, { plan: number; invoices: number }>();
-  for (const e of s.expenses.filter((e) => isFeedPurchase(s, e))) {
+  for (const e of s.expenses.filter((e) => isFeedPurchase(s, e) && !e.purchaseAdjustment)) {
     const key = expenseFeedMeal(e, s.mealTypes)?.id || e.id,
       g = purchaseGroups.get(key) || { plan: 0, invoices: 0 };
     if (e.frequency === "once") g.invoices += monthlyExpense(e, month);
@@ -203,7 +203,7 @@ export function costs(s: State, month: string) {
     purchaseGroups.set(key, g);
   }
   const purchases = money(
-    [...purchaseGroups.values()].reduce(
+    s.expenses.filter(e => e.purchaseAdjustment === true).reduce((n,e)=>n+monthlyExpense(e,month),0) + [...purchaseGroups.values()].reduce(
       (n, g) => n + Math.max(g.plan, g.invoices),
       0,
     ),

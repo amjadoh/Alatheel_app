@@ -4,6 +4,7 @@ import { financialSummary } from "./finance";
 
 export const financialActions = new Set([
   "stock.purchase",
+  "stock.purchase.correct",
   "stock.reconcile",
   "feeding.skip",
   "finance.rollover",

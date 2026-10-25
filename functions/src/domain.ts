@@ -605,6 +605,66 @@ export function applyCommand(
       });
       break;
     }
+    case "stock.purchase.correct": {
+      ensure(a.role === "admin", "تصحيح عملية الشراء للمدير فقط");
+      const original = find(s, "inventoryTransactions", id);
+      ensure(original.movementKind === "purchase", "اختر عملية الشراء الأصلية من سجل المخزون");
+      const currentId = original.latestCorrectionId || original.id;
+      ensure(d.expectedCorrectionId === currentId, "تغيرت عملية الشراء؛ افتح سجل الحركات من جديد");
+      const previous = find(s, "inventoryTransactions", currentId);
+      const oldQuantity = Number(previous.correctedQuantity ?? original.amount);
+      const oldTotal = Number(previous.correctedTotal ?? original.total);
+      const amount = num(d.amount, "كمية الشراء الصحيحة", 0.01);
+      const total = money(num(d.total, "إجمالي المبلغ الصحيح", 0.01));
+      ensure(total <= 1000000, "قيمة الشراء تتجاوز حد العملية");
+      const reason = required(d.reason, "سبب تصحيح الشراء");
+      ensure(amount !== oldQuantity || total !== oldTotal, "لم تتغير الكمية أو المبلغ");
+      const meal = find(s, "mealTypes", original.mealTypeId);
+      ensure(meal.unit === original.unit, "تغيرت وحدة الصنف؛ راجع وحدة الشراء قبل التصحيح");
+      const expense = find(s, "expenses", original.expenseId);
+      const payment = find(s, "expensePayments", original.paymentId);
+      ensure(expense.stockTransactionId === id && payment.stockTransactionId === id && payment.status === "paid", "روابط الشراء والسداد تحتاج مراجعة؛ لم يُحفظ التصحيح");
+      ensure(!s.inventoryTransactions.some(t => t.id === c.requestId), "معرف التصحيح مستخدم");
+      // An actual physical count supersedes every earlier quantity movement.
+      const reconciled = s.inventoryTransactions.some(t => t.mealTypeId === meal.id &&
+        ["reconciliation", "feeding_activation"].includes(t.movementKind) && t.createdAt >= original.createdAt);
+      const quantityDelta = stockPrecision(amount - oldQuantity);
+      const stockDelta = reconciled ? 0 : quantityDelta;
+      const balance = stockPrecision(Number(meal.currentStock || 0) + stockDelta);
+      ensure(balance >= 0, "التصحيح يجعل الرصيد سالبًا؛ طابق الموجود فعليًا أولًا ثم صحح الشراء");
+      const delta = money(total - oldTotal);
+      const closed = s.financialPeriods.some(p => p.id === businessDay(original.paidAt).slice(0,7) && p.closed);
+      const record: Row = { id:c.requestId, mealTypeId:meal.id, mealName:meal.name,
+        movementKind:"purchase_correction", type:stockDelta < 0 ? "remove" : "add", amount:Math.abs(stockDelta),
+        stockDelta, quantityDelta, correctedQuantity:amount, correctedTotal:total,
+        previousQuantity:oldQuantity, previousTotal:oldTotal, originalPurchaseId:id, previousCorrectionId:currentId,
+        reason, performedBy:a.uid, createdAt:now, paidAt:original.paidAt, unit:original.unit,
+        balance, settlementPeriod:closed ? today.slice(0,7) : businessDay(original.paidAt).slice(0,7),
+        stockCountPreserved:reconciled, cashDelta:delta, closedPeriodSettlement:closed,
+        previousExpense:structuredClone(expense), previousPayment:structuredClone(payment) };
+      if (closed && delta !== 0) {
+        const expenseId=c.requestId+"_adjustment", paymentId=c.requestId+"_payment";
+        ensure(!s.expenses.some(e=>e.id===expenseId)&&!s.expensePayments.some(p=>p.id===paymentId),"التسوية مسجلة بالفعل");
+        s.expenses.push({id:expenseId,name:"تسوية شراء "+meal.name,cost:delta,frequency:"once",
+          incurredAt:today,expenseKind:"feed_purchase",expenseCategory:"other",allocationScope:"all_active",
+          chargedTo:"stable",horseIds:[],allocations:{},collectedHorseIds:[],lockedForPayments:true,
+          stockTransactionId:id,purchaseAdjustment:true,mealTypeId:meal.id,createdAt:now,updatedAt:now});
+        s.expensePayments.push({id:paymentId,expenseId,expenseName:"تسوية شراء "+meal.name,amount:delta,
+          paidAt:today,period:today.slice(0,7),status:"paid",method:payment.method,expenseKind:"feed_purchase",
+          cashCategory:"inventory",stockTransactionId:id,purchaseAdjustment:true,notes:reason,performedBy:a.uid,createdAt:now});
+        record.adjustmentExpenseId=expenseId;record.adjustmentPaymentId=paymentId;
+      } else if (!closed) {
+        expense.cost=total;expense.quantity=amount;expense.unitPrice=Number((total/amount).toFixed(8));expense.updatedAt=now;
+        payment.amount=total;payment.correctedAt=now;payment.correctionId=c.requestId;
+      }
+      meal.currentStock=balance;
+      const latest = s.inventoryTransactions.filter(t=>t.mealTypeId===meal.id&&t.movementKind==="purchase")
+        .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))||b.id.localeCompare(a.id))[0];
+      if(latest?.id===id) meal.pricePerUnit=Number((total/amount).toFixed(8));
+      original.latestCorrectionId=c.requestId;
+      s.inventoryTransactions.push(record);
+      break;
+    }
     case "stock.reconcile": {
       const meal = find(s, "mealTypes", id);
       const actual = num(d.actualQuantity, "الكمية الفعلية");

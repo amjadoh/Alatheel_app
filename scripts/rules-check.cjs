@@ -38,6 +38,8 @@ async function main(){
     await assertFails(deleteDoc(doc(db,'incomes/'+id)));
   }
   await assertFails(setDoc(doc(staffDB,'incomes/forged_adjustment'),{horseId:'horse',amount:100,status:'collected',dueDate:stamp,reversalAt:'2026-10-20T09:00:00Z'}));
+  await assertFails(setDoc(doc(staffDB,'expenses/forged_purchase_adjustment'),{name:'forged',cost:20,frequency:'once',horseIds:[],purchaseAdjustment:true,stockTransactionId:'purchase'}));
+  await assertFails(setDoc(doc(staffDB,'inventoryTransactions/forged_purchase_correction'),{movementKind:'purchase_correction',amount:2,correctedTotal:200}));
   await assertSucceeds(getDoc(doc(staffDB,'appFeedback/sample')));
   for(const db of [otherDB,ownerDB,disabledDB]) await assertFails(getDoc(doc(db,'appFeedback/sample')));
   for(const db of [staffDB,otherDB,ownerDB]){

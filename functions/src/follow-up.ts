@@ -69,7 +69,7 @@ export function operationalFollowUp(state: State, today: string) {
     return false;
   });
   const payments = state.expensePayments.filter(payment => !["void", "pending"].includes(payment.status)).filter(payment => {
-    if (validAmount(payment.amount) && validDay(payment.paidAt)) {
+    if (validAmount(payment.purchaseAdjustment ? Math.abs(Number(payment.amount)) : payment.amount) && validDay(payment.paidAt)) {
       if (!payment.expenseId || !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(payment.period || ""))) {
         payableAmountsComplete = false;
         observe({ code: "payment_period_missing", entity: "finance", id: payment.id, name: "سداد يحتاج ربطًا بالمصروف",
@@ -197,7 +197,7 @@ export function operationalFollowUp(state: State, today: string) {
       // A recurring feed budget is not an additional supplier invoice. Recorded
       // purchase invoices and their payments remain included exactly once.
       if (isFeedPurchase(definitions, expense) && expense.frequency !== "once") continue;
-      if (!validAmount(expense.cost) || expense.frequency === "once" && !validDay(expense.incurredAt || expense.createdAt)) {
+      if (!validAmount(expense.purchaseAdjustment ? Math.abs(Number(expense.cost)) : expense.cost) || expense.frequency === "once" && !validDay(expense.incurredAt || expense.createdAt)) {
         payableAmountsComplete = false;
         observe({ code: "expense_cost_missing", entity: "expense", id: expense.id, name: expense.name || "مصروف",
           message: "مبلغ المصروف أو تاريخ استحقاقه غير مكتمل؛ توقع المدفوعات يحتاج مراجعة هذا السجل" });

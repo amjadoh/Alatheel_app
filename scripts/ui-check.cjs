@@ -107,7 +107,7 @@ async function main() {
             layout.closeSize >= 44,
         );
         assert.deepEqual(layout.headings, [
-          "📖 التعليمات", "💬 ملاحظات التطبيق", "📦 المخزون — كيف تسجل الكمية والمبلغ؟", "💳 التحصيل وكشف حساب الخيل",
+          "📖 التعليمات", "💬 ملاحظات التطبيق", "🐎 الخيل والتغذية", "📦 المخزون", "💳 التحصيل وكشف حساب الخيل", "📅 حفظ حسابات الأشهر السابقة",
         ]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),
@@ -339,6 +339,13 @@ async function main() {
         await page.getByRole("dialog").getByRole("button",{name:"تعديل",exact:true}).click();
         const form=page.getByRole("dialog",{name:"تعديل بيانات الخيل",exact:true});
         await form.getByLabel("تكرار التغذية 1",{exact:true}).selectOption("monthly");
+        const times=form.getByLabel("عدد مرات التغذية 1",{exact:true});
+        await times.fill("");assert.equal(await times.isVisible(),true);
+        await times.pressSequentially("12");assert.equal(await times.inputValue(),"12");
+        assert.equal(await form.getByLabel("تكرار التغذية 1",{exact:true}).inputValue(),"monthly");
+        assert.equal(await form.locator(".feeding-slot").count(),12);
+        await times.fill("7");assert.equal(await form.locator(".feeding-slot").count(),7);
+        await times.fill("2");
         await form.getByLabel("كمية التغذية 1",{exact:true}).fill("0.5");
         await form.getByLabel("يوم التغذية 1 موعد 1",{exact:true}).selectOption("6");
         await form.getByLabel("ترتيب التغذية 1 موعد 1",{exact:true}).selectOption("1");

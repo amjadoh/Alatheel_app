@@ -583,6 +583,18 @@ export default function App() {
           data: d,
         }),
     });
+  const correctPurchase = (transaction: Row) => {
+    const latest=s.inventoryTransactions.find(t=>t.id===(transaction.latestCorrectionId||transaction.id))!;
+    setDetail(null);
+    setForm({title:"تصحيح عملية الشراء",inventoryItem:transaction.mealTypeId,
+      fields:[{name:"amount",label:`كمية الشراء الصحيحة (${transaction.unit})`,type:"number",min:0.01,required:true},
+        {name:"total",label:"إجمالي المبلغ الصحيح (ريال)",type:"number",min:0.01,max:1000000,required:true},
+        {name:"reason",label:"سبب تصحيح الشراء",type:"textarea",required:true}],
+      values:{amount:latest.correctedQuantity??transaction.amount,total:latest.correctedTotal??transaction.total,
+        expectedCorrectionId:latest.id,correctionRequestId:crypto.randomUUID(),reason:""},
+      note:"يُحفظ الشراء الأصلي وسبب التصحيح. تُحدّث الكمية والمصروف والسداد دون تكرار. إذا تمت مطابقة فعلية بعد الشراء، تبقى الكمية المطابقة كما هي. تصحيح شهر مقفل يسجل فرق التسوية في الشهر الحالي. لا يغير التصحيح تاريخ الشراء أو طريقة سداده.",
+      submit:d=>execute({action:"stock.purchase.correct",id:transaction.id,requestId:d.correctionRequestId,data:d})});
+  };
   const move = (m: Row, type: string) =>
     setForm({
       title: `${type === "add" ? "تصحيح زيادة رصيد" : "صرف من"} ${m.name}`,
@@ -1829,6 +1841,12 @@ export default function App() {
                                           تاريخ السداد {displayDate(t.paidAt)}
                                         </p>
                                       )}
+                                      {t.movementKind === "purchase_correction" && <>
+                                        <p>تصحيح شراء: من {displayQuantity(t.previousQuantity)} إلى {displayQuantity(t.correctedQuantity)} {t.unit} · من {money(t.previousTotal)} إلى {money(t.correctedTotal)} ر.س</p>
+                                        <p className="small muted">الشراء الأصلي: <bdi>{t.originalPurchaseId}</bdi> · {t.closedPeriodSettlement ? `تسوية في ${displayMonth(t.settlementPeriod)}` : "تم تحديث المصروف والسداد"}{t.stockCountPreserved ? " · الكمية المطابقة محفوظة" : ""}</p>
+                                      </>}
+                                      {t.movementKind === "purchase" && t.latestCorrectionId && <p className="small muted">سجل الشراء الأصلي محفوظ؛ راجع التصحيحات المرتبطة به.</p>}
+                                      {t.movementKind === "purchase" && isAdmin && <Button kind="outline" onClick={()=>correctPurchase(t)}>تصحيح عملية الشراء</Button>}
                                       <small>
                                         {displayDateTime(t.createdAt)}{" "}
                                         · الرصيد {displayQuantity(t.balance)}
@@ -2136,6 +2154,7 @@ export default function App() {
                           دُفع {displayDate(p.paidAt)} · يخص {displayMonth(p.period)}{" "}
                           {p.notes ? `· ${p.notes}` : ""}
                         </p>
+                        {p.purchaseAdjustment && <p className="small muted">فرق تسوية تصحيح شراء سابق · {p.notes}</p>}
                         {p.status === "void" ? (
                           <p className="small value-negative">
                             سداد ملغى: {p.voidReason}
@@ -2955,6 +2974,7 @@ function actionLabel(action: string) {
         "meal.delete": "حذف صنف",
         "stock.move": "حركة مخزون",
         "stock.purchase": "شراء مخزون مدفوع",
+        "stock.purchase.correct": "تصحيح عملية شراء",
         "finance.rollover": "حفظ الفترة المالية",
         "expense.save": "تسجيل مصروف",
         "expense.pay": TERMS.expensePayment,
