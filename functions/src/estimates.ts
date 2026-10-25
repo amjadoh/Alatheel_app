@@ -3,6 +3,7 @@ import type { State, Row } from "./domain";
 import { feedingMeasure, feedingUnitPrice, expenseFeedMeal, feedingAtDate, feedingOnDate, feedingSkipped, horsePresentOn } from "./feeding";
 import { businessDay } from "./dates";
 import { stayDays } from "./boarding";
+import { receiptCash } from "./receipt-cash";
 
 export function isFeedPurchase(s: State, e: Row) {
   return e.expenseKind === "feed_purchase" || !!expenseFeedMeal(e, s.mealTypes);
@@ -208,7 +209,7 @@ export function costs(s: State, month: string) {
     ),
   );
   const collected = money(
-    s.income
+    receiptCash(s)
       .filter(
         (i) =>
           i.status !== "pending" &&

@@ -18,6 +18,26 @@ export type {
 } from "../../functions/src/domain";
 let s = emptyState();
 export function getNotificationServices(){return null as any;}
+const qaFeedback = new Map<string,any>(), qaFeedbackCalls: any[] = [];
+let lostFeedbackAcknowledgement=false;
+(window as any).__feedbackQA=()=>({notes:[...qaFeedback.values()].map(n=>({id:n.id,syncState:n.syncState,files:n.files})),calls:qaFeedbackCalls.map(c=>({action:c.action,id:c.id,file:c.file,chunk:c.chunk}))});
+export async function feedbackCommand(data:Record<string,any>){
+  if(new URLSearchParams(location.search).get("scenario")!=="feedback")throw new Error("المزامنة مع المستودع غير مفعلة في بيانات الفحص المحلية");
+  if(a.role!=="admin")throw new Error("للمدير فقط");
+  qaFeedbackCalls.push(data);
+  if(data.action==="create"){
+    if(!qaFeedback.has(data.id))qaFeedback.set(data.id,{...data,syncState:"draft"});
+    return {ok:true,syncState:qaFeedback.get(data.id).syncState};
+  }
+  const note=qaFeedback.get(data.id);if(!note)throw new Error("ملاحظة مفقودة");
+  if(data.action==="upload"){if(note.syncState!=="draft")throw new Error("الملاحظة مرسلة");return{ok:true};}
+  if(data.action==="submit"){
+    note.syncState="queued";
+    if(!lostFeedbackAcknowledgement){lostFeedbackAcknowledgement=true;throw new Error("انقطع تأكيد الشبكة التجريبي بعد حفظ الملاحظة");}
+    return{ok:true};
+  }
+  return{ok:true};
+}
 const a: Actor = {
   uid: "qa",
   displayName: "مدير تجريبي",
@@ -172,6 +192,7 @@ export function retryLoginSession() { emit(s,a,undefined,"ready"); }
 if(new URLSearchParams(location.search).get("scenario")==="owner-alerts"){
   a.uid="owner";a.ownerRecordId="owner";a.role="owner";a.displayName="مالك تجريبي";
 }
+if(new URLSearchParams(location.search).get("scenario")==="feedback-employee")a.role="employee";
 let lostReceiptAcknowledgement = false;
 export const inspectQA = () => structuredClone(s);
 (window as any).__alatheelQA = inspectQA;

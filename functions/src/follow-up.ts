@@ -1,5 +1,6 @@
 import { date, money, type Row, type State } from "./domain";
-import { horseAccount, isReceipt, type AccountItem } from "./accounts";
+import { horseAccount, type AccountItem } from "./accounts";
+import { receiptCash, activeReceipt } from "./receipt-cash";
 import { businessDay } from "./dates";
 import { expensePeriodState, expensePaid, financialSummary, monthEnd } from "./finance";
 import { expenseShares, isFeedPurchase, monthlyExpense } from "./estimates";
@@ -55,8 +56,8 @@ export function operationalFollowUp(state: State, today: string) {
     if (!observations.some(item => item.code === value.code && item.entity === value.entity && item.id === value.id)) observations.push(value);
   };
   let cashComplete = true, payableAmountsComplete = true;
-  const receipts = state.income.filter(isReceipt).filter(receipt => {
-    if (validAmount(receipt.amount) && validDay(receipt.collectedAt)) {
+  const receipts = receiptCash(state).filter(receipt => {
+    if (validAmount(receipt.cashAdjustment ? -Number(receipt.amount) : receipt.amount) && validDay(receipt.collectedAt)) {
       if (!receipt.horseId || !state.horses.some(horse => horse.id === receipt.horseId))
         observe({ code: "receipt_link_missing", entity: "finance", id: receipt.id, name: "تحصيل يحتاج ربطًا بكشف الحساب",
           message: "المبلغ المحصل مسجل، لكن الخيل المرتبط به غير متاح؛ راجع السجل قبل تأكيد المتبقي على الملاك" });
@@ -83,7 +84,9 @@ export function operationalFollowUp(state: State, today: string) {
   });
   // An incomplete cash record cannot silently count as a zero payment, or settle
   // a horse's balance merely because an absent timestamp compares before today.
-  const ledgerState: State = { ...state, income: receipts, expensePayments: payments };
+  const ledgerState: State = { ...state,
+    income: state.income.filter(r => !activeReceipt(r) || validAmount(r.amount) && validDay(r.collectedAt)),
+    expensePayments: payments };
   const collections = { dueToday: [] as CollectionFollowUp[], overdue: [] as CollectionFollowUp[], upcoming: [] as CollectionFollowUp[] };
   const receivables = { total: 0, boarding: 0, extras: 0, priorMonthArrears: 0, overdueThisMonth: 0, dueToday: 0, upcoming: 0 };
   let receivablesComplete = !observations.some(item => ["receipt_cash_incomplete", "receipt_link_missing"].includes(item.code));

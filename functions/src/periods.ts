@@ -19,6 +19,8 @@ export const financialActions = new Set([
   "expense.pay",
   "expense.payment.void",
   "income.pay",
+  "income.correct",
+  "income.void",
   "income.collect",
 ]);
 const sources = [

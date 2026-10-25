@@ -1,0 +1,22 @@
+name: Sync app feedback
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+  id-token: write
+concurrency:
+  group: app-feedback-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Synchronize private notes and attachments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/sync-feedback.py

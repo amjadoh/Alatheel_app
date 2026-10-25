@@ -2,7 +2,8 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { feedbackFunctions } from "./feedback-server";
 import { defineSecret } from "firebase-functions/params";
 import { createTransport } from "nodemailer";
 import { invitationMessage, invitationFailureCode } from "./invitations";
@@ -31,6 +32,9 @@ const databaseId =
   process.env.FIRESTORE_DATABASE_ID ||
   "ai-studio-3316cd3a-14d1-4f71-adec-897324c5bb0e";
 const db = getFirestore(databaseId);
+const feedbackExports = feedbackFunctions(db, verifiedGoogle);
+export const appFeedback = feedbackExports.appFeedback;
+export const feedbackBridge = feedbackExports.feedbackBridge;
 const auth = getAuth();
 const notificationExports = notificationFunctions(db, databaseId, optionsForNotifications(), verifiedGoogle);
 export const updatePushDevice = notificationExports.updatePushDevice;
@@ -81,6 +85,8 @@ const needs: Record<string, Collection[]> = {
   ],
   "income.collect": ["horses", "expenses", "income"],
   "income.pay": ["horses", "expenses", "income"],
+  "income.correct": ["horses", "expenses", "income"],
+  "income.void": ["horses", "expenses", "income"],
   "profile.save": ["users"],
   "settings.save": ["settings"],
 };
@@ -102,6 +108,8 @@ for (const action of [
   "expense.pay",
   "expense.payment.void",
   "income.pay",
+  "income.correct",
+  "income.void",
   "income.collect",
 ])
   needs[action] = [
@@ -237,7 +245,7 @@ export const operate = onCall(options, async (request) => {
                 value[key] = Timestamp.fromDate(new Date(value[key]));
             if (name === "income") {
               value.dueDate = Timestamp.fromDate(new Date(value.dueDate));
-              value.status = "collected";
+              value.status = row.status || "collected";
             }
             tx.set(db.doc(`${storageCollection(name)}/${id}`), value);
           }
@@ -552,6 +560,28 @@ export const manageMember = onCall(options, async (request) => {
 const smtpPassword = invitationsEnabled
   ? defineSecret("MEMBER_INVITATION_SMTP_PASSWORD")
   : null;
+export const sendAppFeedbackEmail = invitationsEnabled ? onDocumentUpdated({
+  ...options, database: databaseId, document: "appFeedback/{feedbackId}", secrets: [smtpPassword!], retry: false,
+}, async event => {
+  const ref = event.data?.after.ref;
+  if (!ref || event.data?.after.data().emailState !== "queued" || event.data?.before.data().emailState === "queued") return;
+  const note = await db.runTransaction(async tx => {
+    const snap = await tx.get(ref), value = snap.data();
+    if (value?.emailState !== "queued" || !value.issueUrl) return null;
+    tx.update(ref, { emailState: "sending" }); return value;
+  });
+  if (!note) return;
+  try {
+    const transport = createTransport({ host: process.env.INVITATION_SMTP_HOST || "smtp.gmail.com", port: 465, secure: true,
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
+      auth: { user: process.env.INVITATION_MAIL_USER || "amjadoh@gmail.com", pass: smtpPassword!.value().replace(/\s/g, "") } });
+    await transport.sendMail({ from: process.env.INVITATION_FROM || "إسطبل الأثيل <amjadoh@gmail.com>", to: "amjadoh@gmail.com",
+      subject: "ملاحظة على تطبيق الأثيل · " + note.version,
+      messageId: `<alatheel-feedback-${ref.id}@gen-lang-client-0145196991.firebaseapp.com>`,
+      text: `${note.createdByName}\n${note.createdAt}\nالإصدار ${note.version}\n\n${note.text || "مرفقات فقط"}\n\nالملاحظة والصور والمرفقات في المستودع الخاص:\n${note.issueUrl}` });
+    await ref.update({ emailState: "sent" });
+  } catch { await ref.update({ emailState: "failed" }); logError("App feedback email failed", { feedbackId: ref.id }); }
+}) : undefined;
 export const sendMemberInvitation = invitationsEnabled
   ? onDocumentCreated(
       {

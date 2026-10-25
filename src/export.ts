@@ -4,6 +4,7 @@ import { Directory, Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { State } from "./service";
 import { businessDay } from "../functions/src/dates";
+import { receiptCash, activeReceipt } from "../functions/src/receipt-cash";
 import {
   displayAmount,
   displayMonth,
@@ -42,6 +43,7 @@ export async function exportExcel(
         "الخيل",
         "المالك",
         "الحالة",
+        "السند الأصلي", "سبب التغيير", "تاريخ التغيير", "بواسطة",
         "التسجيل",
         "رسوم الإيواء",
         "التحصيل خلال الشهر",
@@ -117,7 +119,8 @@ export async function exportExcel(
         )[i.method] || "",
         i.advanceAmount || 0,
         i.notes || "",
-        i.status,
+        i.status === "void" ? "ملغاة" : i.status === "replaced" ? "تم تصحيحها" : i.status,
+        i.correctsReceiptId || "", i.changeReason || "", i.changedAt || "", i.changedByName || "",
       ]),
     ],
     [
@@ -168,7 +171,7 @@ export async function exportExcel(
   sheets.push([
     "توزيع الدفعات",
     ["السند", "الخيل", TERMS.collectionDate, "الاستحقاق", "النوع", "المبلغ"],
-    s.income.flatMap((i) =>
+    s.income.filter(activeReceipt).flatMap((i) =>
       (i.allocations || []).map((x: any) => [
         i.id,
         i.horseName,
@@ -178,6 +181,13 @@ export async function exportExcel(
         x.amount,
       ]),
     ),
+  ]);
+  sheets.push([
+    "التحصيل والتسويات",
+    ["السند", "الخيل", TERMS.collectionDate, "المبلغ", "النوع", "السند المرتبط"],
+    receiptCash(s).map(i => [i.id, i.horseName, businessDay(i.collectedAt), i.amount,
+      i.cashAdjustment || i.cashRecognitionAt ? "تسوية تصحيح" : "تحصيل",
+      i.sourceReceiptId || i.correctsReceiptId || ""]),
   ]);
   if (includeFinancials)
     sheets.push([

@@ -12,7 +12,7 @@ import {
   cashCategory,
 } from "./finance";
 import { businessDay } from "./dates";
-import { horseAccount, planPayment, accountRevision } from "./accounts";
+import { horseAccount, planPayment, accountRevision, isReceipt, preserveAccountCharges, refreshAccountBalance } from "./accounts";
 import {
   financialActions,
   closePeriods,
@@ -907,8 +907,33 @@ export function applyCommand(
       });
       break;
     }
+    case "income.void": {
+      ensure(a.role === "admin", "إلغاء دفعة المالك للمدير فقط");
+      const receipt = find(s, "income", id);
+      ensure(isReceipt(receipt), "الدفعة ملغاة أو سبق تصحيحها");
+      const h = find(s, "horses", receipt.horseId);
+      ensure(d.expectedRevision === accountRevision(s, h), "تغير كشف الحساب؛ حدّث الشاشة قبل إلغاء الدفعة");
+      const reason = required(d.reason, "سبب الإلغاء");
+      preserveAccountCharges(s, h, today);
+      receipt.status = "void";
+      receipt.receiptAuditLocked = true;
+      receipt.changeReason = reason;
+      receipt.changedAt = now;
+      receipt.changedBy = a.uid;
+      receipt.changedByName = a.displayName;
+      if (s.financialPeriods.some(p => p.closed && p.id === businessDay(receipt.cashRecognitionAt || receipt.collectedAt).slice(0, 7)))
+        receipt.reversalAt = today + "T09:00:00.000Z";
+      refreshAccountBalance(s, h, today, now);
+      ownerId = h.ownerId;
+      break;
+    }
+    case "income.correct":
     case "income.pay": {
-      const h = find(s, "horses", id);
+      const correcting = c.action === "income.correct";
+      if (correcting) ensure(a.role === "admin", "تصحيح دفعة المالك للمدير فقط");
+      const original = correcting ? find(s, "income", id) : undefined;
+      if (original) ensure(isReceipt(original), "الدفعة ملغاة أو سبق تصحيحها");
+      const h = find(s, "horses", original?.horseId || id);
       ensure(
         ["boarding", "boarding_breeding", "archived"].includes(h.status) &&
           h.previousStatus !== "private",
@@ -923,14 +948,16 @@ export function applyCommand(
         "حدد نوع الدفعة",
       );
       const paidAt = date(d.paidAt);
-      assertOpenPeriod(s, paidAt);
+      const targetClosed = s.financialPeriods.some(p => p.closed && p.id === paidAt.slice(0, 7));
+      if (!correcting) assertOpenPeriod(s, paidAt);
       ensure(paidAt <= today, "لا يمكن تسجيل دفعة بتاريخ مستقبلي");
       ensure(
         !h.entryDate || paidAt >= h.entryDate,
         "تاريخ التحصيل يسبق دخول الخيل",
       );
       const amount = money(num(d.amount, "المبلغ المستلم", 0.01));
-      ensure(amount <= 1000000, "المبلغ يتجاوز حد الدفعة");
+      ensure(amount >= 0.01 && amount <= 1000000, "المبلغ يجب أن يكون بين هللة ومليون ريال");
+      ensure(!s.income.some(r => r.id === c.requestId), "معرف الدفعة مستخدم سابقًا");
       ensure(
         ["bank", "cash", "card", "other"].includes(d.method),
         "حدد طريقة التحصيل",
@@ -939,8 +966,21 @@ export function applyCommand(
         Array.isArray(d.periods || []) && (d.periods || []).length <= 120,
         "الأشهر المحددة غير صحيحة",
       );
+      if (original) {
+        const reason = required(d.reason, "سبب التصحيح");
+        preserveAccountCharges(s, h, today);
+        original.status = "replaced";
+        original.receiptAuditLocked = true;
+        original.changeReason = reason;
+        original.changedAt = now;
+        original.changedBy = a.uid;
+        original.changedByName = a.displayName;
+        original.replacedBy = c.requestId;
+        if (s.financialPeriods.some(p => p.closed && p.id === businessDay(original.cashRecognitionAt || original.collectedAt).slice(0, 7)))
+          original.reversalAt = today + "T09:00:00.000Z";
+      }
       const plan = planPayment(s, h, { ...d, amount }, today);
-      if (d.paymentType === "monthly")
+      if (d.paymentType === "monthly" && !correcting)
         ensure(
           plan.selectedBalance > 0 && amount === plan.selectedBalance,
           "المبلغ يجب أن يساوي المتبقي من استحقاق الشهر المحدد من تاريخ التحصيل",
@@ -957,7 +997,7 @@ export function applyCommand(
           "اختر أشهرًا سابقة لتاريخ التحصيل",
         );
         ensure(
-          plan.selectedBalance > 0 && amount <= plan.selectedBalance,
+          correcting || (plan.selectedBalance > 0 && amount <= plan.selectedBalance),
           "المبلغ يتجاوز متبقي الأشهر المحددة",
         );
       }
@@ -1006,6 +1046,13 @@ export function applyCommand(
         year: Number(paidAt.slice(0, 4)),
         createdAt: now,
         performedBy: a.uid,
+        ...(original ? {
+          correctsReceiptId: original.id,
+          correctionRootId: original.correctionRootId || original.id,
+          changeReason: original.changeReason,
+          receiptAuditLocked: true,
+          ...(targetClosed ? { cashRecognitionAt: today + "T09:00:00.000Z" } : {}),
+        } : {}),
       });
       const after = horseAccount(s, h, today);
       for (const item of after.items.filter((x) => x.kind === "expense")) {
@@ -1034,6 +1081,7 @@ export function applyCommand(
         h.accountAnchor;
       h.dueDate = unpaid?.dueDate || nextMonth(last);
       h.updatedAt = now;
+      refreshAccountBalance(s, h, today, now);
       ownerId = h.ownerId;
       break;
     }

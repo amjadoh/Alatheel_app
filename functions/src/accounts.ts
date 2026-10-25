@@ -2,6 +2,7 @@ import { money, nextMonth } from "./domain";
 import type { State, Row } from "./domain";
 import { businessDay } from "./dates";
 import { boardingAmount, boardingTerms } from "./boarding";
+import { activeReceipt } from "./receipt-cash";
 
 export type AccountItem = {
   id: string;
@@ -20,8 +21,7 @@ export const endOfMonth = (day: string) => {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 };
 const cents = (n: unknown) => Math.round(Number(n || 0) * 100);
-export const isReceipt = (i: Row) =>
-  i.status !== "void" && i.status !== "pending";
+export const isReceipt = activeReceipt;
 /** An unpaid legacy dueDate is the opening boundary, never a guessed entry-date debt. */
 export function horseAccount(
   s: State,
@@ -76,6 +76,15 @@ export function horseAccount(
     cursor = nextMonth(cursor);
   }
   // Legacy receipts retain their original fee and expense snapshots, including historical cutoffs.
+  for (const [dueDate, value] of privateHorse ? [] : frozen)
+    if (dueDate <= stop) add({
+      id: "boarding_" + dueDate, kind: "boarding", dueDate,
+      name: "إيواء " + dueDate.slice(0, 7),
+      amount: value.billingPolicy === "per_day"
+        ? boardingAmount(h, dueDate.slice(0, 7), value.baseFee, "per_day") : money(Number(value.amount)),
+      baseFee: value.baseFee ?? value.amount, billingPolicy: value.billingPolicy || "full_month",
+      paid: 0, remaining: 0,
+    });
   for (const r of receipts.filter((r) => !privateHorse && !r.accountVersion)) {
     const d = businessDay(r.dueDate);
     if (d && d <= stop)
@@ -228,6 +237,36 @@ export function accountRevision(s: State, h: Row) {
   for (let i = 0; i < source.length; i++)
     hash = Math.imul(hash ^ source.charCodeAt(i), 16777619);
   return (hash >>> 0).toString(16);
+}
+/** Preserve legacy charges before removing a receipt; never infer debt from entry date. */
+export function preserveAccountCharges(s: State, h: Row, today: string) {
+  const account = horseAccount(s, h, today);
+  h.accountAnchor ||= h.dueDate;
+  h.accountVersion = 1;
+  h.accountCycles = account.items.filter(x => x.kind === "boarding").map(x => ({
+    dueDate: x.dueDate, amount: x.amount, baseFee: x.baseFee ?? x.amount,
+    billingPolicy: x.billingPolicy || "full_month",
+  }));
+  h.accountExtras = account.items.filter(x => x.kind === "expense").map(x => ({
+    id: x.id, ...(x.expenseId ? { expenseId: x.expenseId } : {}),
+    dueDate: x.dueDate, name: x.name, amount: x.amount,
+  }));
+}
+export function refreshAccountBalance(s: State, h: Row, today: string, now: string) {
+  const after = horseAccount(s, h, today);
+  for (const item of after.items.filter(x => x.kind === "expense")) {
+    const e = s.expenses.find(e => e.id === item.expenseId);
+    if (!e) continue;
+    // Keep audit locks once money has ever been allocated to an expense.
+    if (item.paid > 0) e.lockedForReceipts = true;
+    e.collectedHorseIds = [...new Set([
+      ...(e.collectedHorseIds || []).filter((id: string) => id !== h.id),
+      ...(item.remaining === 0 ? [h.id] : []),
+    ])];
+  }
+  const boarding = after.items.filter(x => x.kind === "boarding");
+  h.dueDate = boarding.find(x => x.remaining > 0)?.dueDate || nextMonth(boarding.at(-1)?.dueDate || h.accountAnchor);
+  h.updatedAt = now;
 }
 export function planPayment(
   s: State,

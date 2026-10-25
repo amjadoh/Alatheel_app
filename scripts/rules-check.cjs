@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {createRequire}=require('node:module');
 const qa=createRequire(path.resolve(process.env.QA_BACKEND_MODULES,'_qa.cjs'));
 const {initializeTestEnvironment,assertSucceeds,assertFails}=qa('@firebase/rules-unit-testing');
-const {doc,setDoc,getDoc,updateDoc,Timestamp}=qa('firebase/firestore');
+const {doc,setDoc,getDoc,updateDoc,deleteDoc,Timestamp}=qa('firebase/firestore');
 async function main(){
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Firestore emulator is required');
  const projectId='demo-alatheel';
@@ -24,11 +24,28 @@ async function main(){
     setDoc(doc(db,'users/owner/staffAlerts/update'),{read:false,title:'new app',kind:'app_update'}),
     setDoc(doc(db,'users/owner/staffAlerts/former-staff-alert'),{read:false,title:'private finance',kind:'collection_due'}),
     setDoc(doc(db,'mealTypes/feed'),{name:'feed',unit:'kg',pricePerUnit:2,currentStock:10,minThreshold:3,autoFeedingFrom:'2026-10-19'}),
-    setDoc(doc(db,'horses/horse'),{name:'horse',ownerId:'owner',status:'private',feedingHistory:[],feeding:[],createdAt:stamp,updatedAt:stamp})
+    setDoc(doc(db,'horses/horse'),{name:'horse',ownerId:'owner',status:'private',feedingHistory:[],feeding:[],createdAt:stamp,updatedAt:stamp}),
+    setDoc(doc(db,'incomes/locked_legacy'),{horseId:'horse',horseName:'horse',ownerId:'owner',amount:100,status:'void',dueDate:stamp,collectedAt:stamp,receiptAuditLocked:true}),
+    setDoc(doc(db,'incomes/modern_receipt'),{horseId:'horse',horseName:'horse',ownerId:'owner',amount:100,status:'collected',dueDate:stamp,collectedAt:stamp,accountVersion:1}),
+    setDoc(doc(db,'appFeedback/sample'),{text:'private note',syncState:'queued'}),
+    setDoc(doc(db,'appFeedback/sample/files/0/chunks/0'),{base64:'c2FtcGxl'})
    ]);
   });
   const context=uid=>env.authenticatedContext(uid,{email:uid+'@example.test',email_verified:true,firebase:{sign_in_provider:'google.com'}}).firestore();
   const staffDB=context('staff'),ownerDB=context('owner'),otherDB=context('other'),disabledDB=context('disabled');
+  for(const db of [staffDB,otherDB,ownerDB]) for(const id of ['locked_legacy','modern_receipt']) {
+    await assertFails(updateDoc(doc(db,'incomes/'+id),{amount:900,status:'collected'}));
+    await assertFails(deleteDoc(doc(db,'incomes/'+id)));
+  }
+  await assertFails(setDoc(doc(staffDB,'incomes/forged_adjustment'),{horseId:'horse',amount:100,status:'collected',dueDate:stamp,reversalAt:'2026-10-20T09:00:00Z'}));
+  await assertSucceeds(getDoc(doc(staffDB,'appFeedback/sample')));
+  for(const db of [otherDB,ownerDB,disabledDB]) await assertFails(getDoc(doc(db,'appFeedback/sample')));
+  for(const db of [staffDB,otherDB,ownerDB]){
+    await assertFails(setDoc(doc(db,'appFeedback/forged'),{text:'forged'}));
+    await assertFails(updateDoc(doc(db,'appFeedback/sample'),{issueUrl:'forged'}));
+    await assertFails(getDoc(doc(db,'appFeedback/sample/files/0/chunks/0')));
+    await assertFails(setDoc(doc(db,'feedbackUsage/forged'),{count:0}));
+  }
   await assertSucceeds(getDoc(doc(staffDB,'users/staff/staffAlerts/event')));
   await assertSucceeds(updateDoc(doc(staffDB,'users/staff/staffAlerts/event'),{read:true}));
   await assertFails(updateDoc(doc(staffDB,'users/staff/staffAlerts/event'),{title:'changed'}));

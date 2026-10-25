@@ -337,6 +337,11 @@ export async function logout(clearError=true) {
   if (auth) await signOut(auth);
 }
 export function getNotificationServices(){return db&&functions?{db,functions}:null;}
+export async function feedbackCommand(data: Record<string, any>) {
+  ensure(actor?.role === "admin" && authPhase === "ready" && actor.dataReady, "ملاحظات التطبيق للمدير بعد اكتمال الدخول");
+  ensure(functions, "الاتصال غير جاهز");
+  return (await httpsCallable(functions, "appFeedback", { timeout: 120000 })(data)).data as any;
+}
 const pendingCommands = new Map<string, string>();
 export async function execute(
   c: Omit<Command, "requestId"> & { requestId?: string },

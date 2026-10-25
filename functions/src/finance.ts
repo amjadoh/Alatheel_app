@@ -10,8 +10,9 @@ import {
 import { businessDay } from "./dates";
 import { horseAccount } from "./accounts";
 import { stayDays, boardingAmount } from "./boarding";
+import { activeReceipt, receiptCash } from "./receipt-cash";
 
-const collected = (i: Row) => i.status !== "pending" && i.status !== "void";
+const collected = activeReceipt;
 const day = businessDay;
 export function cashCategory(e: Record<string, any>) {
   if (e.expenseKind === "feed_purchase") return "inventory";
@@ -94,7 +95,7 @@ function calculateHorseFinance(s: State, h: Row, month: string) {
   const total = money(food + other);
   const receipts = s.income.filter((i) => i.horseId === h.id && collected(i));
   const cash = money(
-    receipts
+    receiptCash(s).filter(i => i.horseId === h.id)
       .filter((i) => day(i.collectedAt).slice(0, 7) === month)
       .reduce((n, i) => n + Number(i.amount || 0), 0),
   );

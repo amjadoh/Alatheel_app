@@ -29,6 +29,7 @@ import {
   Archive,
   History,
   ShieldCheck,
+  MessageSquareText,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { App as NativeApp } from "@capacitor/app";
@@ -49,7 +50,10 @@ import {
   nextMonth,
 } from "./service";
 import { HorseAccount, ReceiptDetails } from "./account-ui";
+import { FeedbackLauncher, FeedbackPanel } from "./feedback";
 import { horseAccount } from "../functions/src/accounts";
+import { receiptCash } from "../functions/src/receipt-cash";
+import { financialSummary } from "../functions/src/finance";
 import { emptyState } from "../functions/src/domain";
 import {
   costs,
@@ -206,6 +210,7 @@ export default function App() {
     [releaseOpen, setReleaseOpen] = useState(false),
     [loginOpen, setLoginOpen] = useState(false),
     [accountMenuOpen, setAccountMenuOpen] = useState(false),
+    [feedbackOpen, setFeedbackOpen] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
   const closeRelease = () => {
     markReleaseNotesRead(localStorage);
@@ -235,6 +240,7 @@ export default function App() {
           setLoginOpen(false);
           setAccountHorseId(null);
           setAccountMenuOpen(false);
+          setFeedbackOpen(false);
           prevUid.current = actor?.uid || null;
         }
       }),
@@ -257,6 +263,7 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     const handle = NativeApp.addListener("backButton", () => {
+      if (feedbackOpen) { if (!busy) setFeedbackOpen(false); return; }
       if (releaseOpen) closeRelease();
       else if (accountMenuOpen) setAccountMenuOpen(false);
       else if (accountHorseId) setAccountHorseId(null);
@@ -268,7 +275,7 @@ export default function App() {
     return () => {
       void handle.then((h) => h.remove());
     };
-  }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen]);
+  }, [form, detail, tab, accountHorseId, releaseOpen, accountMenuOpen, feedbackOpen, busy]);
   const stockNeeds = useMemo(() => inventoryNeeds(s, inventoryDay), [s, inventoryDay]);
   const followUp = useMemo(() => a?.dataReady && staff(a) ? operationalFollowUp(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
   const stockRunway = useMemo(() => a?.dataReady && staff(a) ? inventoryRunway(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
@@ -1203,6 +1210,7 @@ export default function App() {
             {isStaff && <button onClick={()=>go("owners")}><Users size={18}/><span>سجل الملاك</span><ChevronLeft size={16}/></button>}
             {isStaff && <button onClick={()=>go("requests")}><ClipboardList size={18}/><span>طلبات تسجيل الخيل</span><ChevronLeft size={16}/></button>}
             {isAdmin && <button onClick={()=>go("members")}><Users size={18}/><span>الأعضاء والصلاحيات</span><ChevronLeft size={16}/></button>}
+            {isAdmin && <button onClick={()=>{setAccountMenuOpen(false);setFeedbackOpen(true);}}><MessageSquareText size={18}/><span>ملاحظات التطبيق</span><ChevronLeft size={16}/></button>}
             <button onClick={()=>go("notifications")}><Bell size={18}/><span>الإشعارات</span><ChevronLeft size={16}/></button>
             <button onClick={()=>go("activity")}><History size={18}/><span>سجل العمليات</span><ChevronLeft size={16}/></button>
             <button onClick={()=>go("more")}><SlidersHorizontal size={18}/><span>بيانات حسابي والإعدادات</span><ChevronLeft size={16}/></button>
@@ -1466,11 +1474,7 @@ export default function App() {
                       const d = new Date();
                       d.setMonth(d.getMonth() - (5 - i));
                       const m = d.toISOString().slice(0, 7),
-                        v = s.income
-                          .filter(
-                            (x) => businessDay(x.collectedAt).slice(0, 7) === m,
-                          )
-                          .reduce((n, x) => n + x.amount, 0),
+                        v = financialSummary(s, m).collected,
                         max =
                           Math.max(1, ...s.income.map((x) => x.amount)) *
                           Math.max(1, s.income.length);
@@ -1923,7 +1927,7 @@ export default function App() {
                       </section>
                     ))
                   : filtered(
-                      s.income.filter(
+                      receiptCash(s).filter(
                         (i) =>
                           businessDay(i.collectedAt).slice(0, 7) === month &&
                           i.status !== "pending" &&
@@ -1939,7 +1943,7 @@ export default function App() {
                             <h2>{i.horseName}</h2>
                             <span className="pill">
                               <Check size={12} />
-                              محصل
+                              {i.cashAdjustment ? "تسوية تصحيح" : "محصل"}
                             </span>
                           </div>
                           <p>{i.ownerName}</p>
@@ -1951,6 +1955,7 @@ export default function App() {
                             {businessDay(i.collectedAt)}
                           </p>
                           <ReceiptDetails receipt={i} />
+                          {a?.role === "admin" && !i.cashAdjustment && <Button kind="outline" onClick={() => { const h = s.horses.find(h => h.id === i.horseId); if (h) collect(h); }}>كشف الحساب وتصحيح الدفعة</Button>}
                           {i.expenseShares?.map((e: any) => (
                             <p className="small" key={e.expenseId}>
                               {e.name}: {money(e.amount)} ر.س
@@ -1959,7 +1964,7 @@ export default function App() {
                         </section>
                       ))}
                 {incomeTab === "collected" &&
-                  !s.income.some(
+                  !receiptCash(s).some(
                     (i) =>
                       businessDay(i.collectedAt).slice(0, 7) === month &&
                       i.status !== "pending" &&
@@ -2519,7 +2524,7 @@ export default function App() {
                   </Button>
                 )}
                 <p className="muted small center">
-                  الأثيل · الإصدار 1.7.0 · أندرويد
+                  الأثيل · الإصدار {RELEASE_VERSION} · أندرويد
                 </p>
                 <UpdateButton />
               </>
@@ -2527,6 +2532,7 @@ export default function App() {
           </div>
         )}
       </main>
+      <FeedbackLauncher visible={!!isAdmin && a?.dataReady === true && !feedbackOpen && !form && !detail && !accountHorseId && !releaseOpen && !accountMenuOpen && !busy} onOpen={()=>setFeedbackOpen(true)}/>
       {a && (
         <nav className="bottom-nav" aria-label="التنقل الرئيسي">
           {nav.map(([key, label, Icon]) => {
@@ -2583,6 +2589,7 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {feedbackOpen && isAdmin && a?.dataReady && <Modal title="ملاحظات التطبيق" close={()=>{if(!busy)setFeedbackOpen(false);}}><FeedbackPanel actor={a} onBusy={setBusy}/></Modal>}
       {loginOpen && (
         <Modal title="أهلًا بك في الأثيل" close={() => setLoginOpen(false)}>
           <img className="login-logo" src="/logo.jpeg" alt="شعار الأثيل" />
@@ -2628,6 +2635,14 @@ export default function App() {
             state={s}
             horse={s.horses.find((h) => h.id === accountHorseId)!}
             canPay={isStaff && a?.dataReady !== false}
+            canModify={a?.role === "admin" && a?.dataReady !== false}
+            onChange={async (action, id, data, requestId) => {
+              setBusy(true);
+              try {
+                await execute({ action, id, data, requestId });
+                setToast(action === "income.void" ? "تم إلغاء الدفعة وإعادة حساب الرصيد" : "تم تصحيح الدفعة وإعادة حساب الرصيد");
+              } finally { setBusy(false); }
+            }}
             onPay={async (data, requestId) => {
               setBusy(true);
               try {
@@ -2941,6 +2956,8 @@ function actionLabel(action: string) {
         "expense.delete": "حذف مصروف",
         "income.collect": "تحصيل رسوم الإيواء",
         "income.pay": "تسجيل دفعة من المالك",
+        "income.correct": "تصحيح دفعة من المالك",
+        "income.void": "إلغاء دفعة من المالك",
         "profile.save": "تحديث الحساب",
         "settings.save": "تحديث بيانات الإسطبل",
         "member.create": "تسجيل عضو",

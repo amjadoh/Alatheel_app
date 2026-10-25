@@ -102,6 +102,7 @@ service cloud.firestore {
 
     function isValidIncome(data) {
       return data.keys().hasAll(['horseId', 'amount', 'dueDate', 'status'])
+        && !data.keys().hasAny(['receiptAuditLocked','cashRecognitionAt','reversalAt','correctsReceiptId','replacedBy','changedAt','changedBy','changedByName','changeReason','correctionRootId'])
         && data.horseId is string && data.horseId.size() <= 128
         && data.amount is number && data.amount >= 0
         && data.status in ['pending', 'collected']
@@ -221,8 +222,8 @@ service cloud.firestore {
     match /incomes/{incomeId} {
       allow read: if isEmployee() || ((isOwner() || isViewer()) && resource.data.ownerId == ownerRecordId());
       allow create: if isEmployee() && isValidIncome(incoming()) && !incoming().keys().hasAny(['accountVersion']) && get(/databases/$(database)/documents/horses/$(incoming().horseId)).data.get('accountVersion',0) != 1;
-      allow update: if isEmployee() && isValidIncome(incoming()) && existing().get('accountVersion',0) != 1 && !incoming().keys().hasAny(['accountVersion']);
-      allow delete: if isAdmin() && existing().get('accountVersion',0) != 1;
+      allow update: if isEmployee() && isValidIncome(incoming()) && !existing().get('receiptAuditLocked',false) && existing().get('accountVersion',0) != 1 && !incoming().keys().hasAny(['accountVersion']);
+      allow delete: if isAdmin() && !existing().get('receiptAuditLocked',false) && existing().get('accountVersion',0) != 1;
     }
 
     match /income/{incomeId} {
@@ -230,6 +231,12 @@ service cloud.firestore {
       allow write: if false;
     }
     match /memberInvitations/{invitationId} { allow read, write: if false; }
+    match /appFeedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /{nested=**} { allow read, write: if false; }
+    }
+    match /feedbackUsage/{usageId} { allow read, write: if false; }
     // 11. Registration Requests
     match /registrationRequests/{requestId} {
       allow list: if isEmployee() || (isSignedIn() && resource.data.ownerId == ownerRecordId());

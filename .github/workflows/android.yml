@@ -35,6 +35,8 @@ jobs:
           version: "11.25.0"
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - name: Verify private feedback export retries and attachment integrity
+        run: python3 scripts/test-feedback-sync.py
       - run: pnpm build
       - run: pnpm --dir functions build
       - name: Install isolated browser test tools
@@ -57,6 +59,10 @@ jobs:
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
         run: node scripts/follow-up-check.cjs
+      - name: Verify receipt correction and feedback attachments on mobile
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/receipt-feedback-check.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -75,7 +81,7 @@ jobs:
           QA_BACKEND_MODULES: ${{ runner.temp }}/alatheel-backend
         run: |
           npm install --prefix "$QA_BACKEND_MODULES" --no-save firebase-tools@15.33.0 @firebase/rules-unit-testing@5.0.0 firebase@12.13.0
-          "$QA_BACKEND_MODULES/node_modules/.bin/firebase" emulators:exec --config firebase.qa.json --project demo-alatheel --only firestore 'node scripts/rules-check.cjs'
+          "$QA_BACKEND_MODULES/node_modules/.bin/firebase" emulators:exec --config firebase.qa.json --project demo-alatheel --only firestore 'node scripts/backend-check.cjs'
       - uses: android-actions/setup-android@v3
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
@@ -147,8 +153,10 @@ jobs:
           gh release download v1.7.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.7.0.apk -D previous
           gh release download v1.8.1 -R "$GITHUB_REPOSITORY" -p Alatheel-1.8.1.apk -D previous
           gh release download v1.9.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.9.0.apk -D previous
+          gh release download v1.10.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.10.0.apk -D previous
           printf '%s\n' '7a4704da10119300389b39fc0526810c87f9831b1eb2dd828c2a8d01a9bc33e8  previous/Alatheel-1.7.0.apk' 'cd0c43f410502c52fe3f0b69a06c0e0f36e12c5953fd9ef36cd9a29bae2e5753  previous/Alatheel-1.8.1.apk' | sha256sum --check
           printf '%s\n' 'a1bb17e5d621e8729b6bd4ccd4c02907037e5bf78a220a455b8b083d514f8fca  previous/Alatheel-1.9.0.apk' | sha256sum --check
+          printf '%s\n' 'b071b52b824fdb1ddb116cd874db202e26bddc6e5b7d0f9ab4a85cebf4fc18dc  previous/Alatheel-1.10.0.apk' | sha256sum --check
       - name: Verify upgrade, cold startup and outdated WebView recovery
         shell: bash
         env:
