@@ -204,12 +204,21 @@ async function main() {
           await nav
             .getByRole("button", { name: "المصروفات", exact: true })
             .click();
+          await page.getByRole("tab",{name:"مشتريات المخزون",exact:true}).click();
           await page
             .getByRole("button", { name: /^شراء / }).first()
             .click();
           const form = page.getByRole("dialog", {
             name: "شراء مخزون · مركزات",
           });
+          await form.getByLabel(/تاريخ الشراء والسداد/).fill("2026-10-27");
+          assert.equal(await form.getByLabel(/يخص فترة/).inputValue(),"2026-10");
+          await form.getByLabel(/تاريخ الشراء والسداد/).fill("2026-10-28");
+          assert.equal(await form.getByLabel(/يخص فترة/).inputValue(),"2026-11");
+          await form.getByLabel(/يخص فترة/).fill("2026-12");
+          await form.getByLabel(/تاريخ الشراء والسداد/).fill("2026-10-16");
+          assert.equal(await form.getByLabel(/يخص فترة/).inputValue(),"2026-12");
+          await form.getByLabel(/يخص فترة/).fill("2026-10");
           await form.getByLabel(/الكمية المشتراة/).fill("20");
           await form.getByLabel(/إجمالي المبلغ المدفوع/).fill("1800");
           await form.getByLabel(/تاريخ الشراء والسداد/).fill("2026-10-16");
@@ -226,6 +235,9 @@ async function main() {
           );
           assert.equal(s.expensePayments.length, 1);
           assert.equal(s.expensePayments[0].amount, 1800);
+          const purchasesPanel=page.getByRole("tabpanel",{name:"مشتريات المخزون",exact:true});
+          assert.equal(await purchasesPanel.getByText("مسدد بالكامل",{exact:true}).count(),1);
+          assert.doesNotMatch(await purchasesPanel.textContent(),/متبقي|تسجيل سداد مصروف/);
         },
       );
       await check(
@@ -234,6 +246,7 @@ async function main() {
           await nav
             .getByRole("button", { name: "المصروفات", exact: true })
             .click();
+          await page.getByRole("tab",{name:"المصروفات الأخرى",exact:true}).click();
           const vet = page.locator("section.card").filter({
             has: page.getByRole("heading", {
               name: "زيارة طبيب",
@@ -583,7 +596,7 @@ async function main() {
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       const noOverflow=await rhodes.evaluate(e=>e.scrollWidth<=e.clientWidth+1);assert.ok(noOverflow);
       await page.screenshot({path:path.join(output,`inventory-${width}.png`),fullPage:true});
-      await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"المصروفات",exact:true}).click();await page.getByRole("button",{name:"شراء الرودس",exact:true}).click();
+      await page.getByRole("navigation",{name:"التنقل الرئيسي"}).getByRole("button",{name:"المصروفات",exact:true}).click();await page.getByRole("tab",{name:"مشتريات المخزون",exact:true}).click();await page.getByRole("button",{name:"شراء الرودس",exact:true}).click();
       const form=page.getByRole("dialog");await form.getByLabel(/الكمية المشتراة/).fill("6");await form.getByLabel(/إجمالي المبلغ المدفوع/).fill("180");
       await form.getByRole("button",{name:"حفظ ومتابعة",exact:true}).click();await form.waitFor({state:"detached"});
       const s=await snapshot(page);assert.equal(s.mealTypes[0].currentStock,16);assert.equal(s.expensePayments.length,1);assert.equal(s.expensePayments[0].amount,180);

@@ -18,7 +18,7 @@ export function coveredFeedPlan(s: State, e: Row, month: string) {
       (x) =>
         x.stockTransactionId &&
         x.mealTypeId === meal.id &&
-        businessDay(x.incurredAt).slice(0, 7) === month,
+        (x.costPeriod || businessDay(x.incurredAt).slice(0, 7)) === month,
     )
   );
 }
@@ -36,7 +36,7 @@ export function monthlyExpense(e: Row, month: string) {
   if(bound.blocked) return 0;
   if (e.startMonth && e.startMonth > month) return 0;
   if (e.frequency === "once")
-    return businessDay(e.incurredAt || e.createdAt).slice(0, 7) === month && (!e.accountingStartDate || businessDay(e.incurredAt || e.createdAt)>=e.accountingStartDate)
+    return (e.costPeriod || businessDay(e.incurredAt || e.createdAt).slice(0, 7)) === month && (!e.accountingStartDate || businessDay(e.incurredAt || e.createdAt)>=e.accountingStartDate)
       ? money(cost)
       : 0;
   return money(

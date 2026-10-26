@@ -65,3 +65,9 @@
 
 .clear-light .bottom-nav button.active{background:var(--gold-soft);color:var(--gold);border-radius:12px}
 .clear-light .bottom-nav button.active:before{display:none}
+.clear-light .expense-tabs{display:flex;gap:5px;background:var(--surface-alt,var(--surface));padding:5px;border-radius:14px;margin:16px 0}
+.clear-light .expense-tabs button{flex:1;min-height:46px;border:0;border-radius:10px;background:transparent;color:var(--ink);font:inherit;padding:9px 5px}
+.clear-light .expense-tabs button[aria-selected="true"]{background:var(--gold-soft);color:var(--gold);font-weight:700}
+.clear-light [role="tabpanel"][hidden]{display:none!important}
+.clear-light .expense-total{background:var(--gold-soft)}
+.clear-light .expense-total>strong{display:block;font-size:28px;margin:10px 0;color:var(--ink)}

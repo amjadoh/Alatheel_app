@@ -84,7 +84,7 @@ import {
   expensePeriodState,
 } from "../functions/src/finance";
 import { prepareHorsePhoto } from "./horse-photo";
-import { businessDay } from "../functions/src/dates";
+import { businessDay, purchasePeriod } from "../functions/src/dates";
 import type { AuthPhase } from "./auth-recovery";
 import { StartupScreen } from "./startup-screen";
 import { startupProgress } from "./startup-progress";
@@ -196,6 +196,7 @@ export default function App() {
     [authIssue, setAuthIssue] = useState(""),
     [startupData, setStartupData] = useState<StartupDataProgress>({ stage: "session", completed: 0, total: 0 }),
     [tab, setTab] = useState("dashboard"),
+    [expenseTab, setExpenseTab] = useState("other"),
     [form, setForm] = useState<Form | null>(null),
     [detail, setDetail] = useState<{
       title: string;
@@ -530,8 +531,8 @@ export default function App() {
           data: { ...d, currentStock: m?.currentStock || 0 },
         }),
       note: m
-        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. الرصيد وحركاته بوحدة الشراء. لمراجعة الموجود فعليًا استخدم «مطابقة الكمية الفعلية»؛ ولشراء جديد استخدم «شراء مخزون وسداد قيمته» من المصروفات. الخصم التلقائي لا يسجل مصروفًا ماليًا جديدًا."
-        : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «شراء مخزون وسداد قيمته» من المصروفات. لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
+        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. الرصيد وحركاته بوحدة الشراء. لمراجعة الموجود فعليًا استخدم «مطابقة الكمية الفعلية»؛ ولشراء جديد استخدم «مشتريات المخزون» من المصروفات. الخصم التلقائي لا يسجل مصروفًا ماليًا جديدًا."
+        : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «مشتريات المخزون» من المصروفات. لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
     });
   const purchase = (m: Row) =>
     setForm({
@@ -559,6 +560,7 @@ export default function App() {
           type: "date",
           required: true,
         },
+        { name: "costPeriod", label: "يخص فترة", type: "month", required: true },
         {
           name: "method",
           label: TERMS.paymentMethod,
@@ -575,10 +577,11 @@ export default function App() {
         amount: 1,
         total: m.pricePerUnit || "",
         paidAt: today(),
+        costPeriod: purchasePeriod(today()),
         method: "bank",
         purchaseRequestId: crypto.randomUUID(),
       },
-      note: "هذه عملية شراء مدفوعة: تزيد كمية الصنف نفسه وتسجل المصروف والسداد مرة واحدة. أدخل إجمالي ما دفعته للكمية كلها. لا تسجل الشراء مرة ثانية في المصروفات. سعر التقدير الحالي يتحدث إلى سعر هذا الشراء؛ الأشهر المغلقة تحتفظ بأسعارها.",
+      note: "الفترة من يوم 28 إلى يوم 27 من الشهر المحدد. «يخص فترة» يحدد تكلفة الشراء، وتاريخ الدفع يحدد خروج المبلغ فعليًا. تزيد الكمية فور الحفظ ويُسجل الشراء والسداد مرة واحدة. أدخل إجمالي المدفوع للكمية كلها.",
       submit: (d) =>
         execute({
           action: "stock.purchase",
@@ -632,7 +635,7 @@ export default function App() {
       ],
       values: { actualQuantity: m.currentStock || 0, reason: "", activate: !m.autoFeedingFrom },
       note: m.autoFeedingFrom
-        ? "أدخل الموجود أمامك الآن. يسجل التطبيق فرق الجرد فقط ويكمل الخصم من الرصيد المصحح، دون مصروف أو سداد جديد. إذا كانت الزيادة من شراء فاستخدم «شراء مخزون وسداد قيمته» من المصروفات."
+        ? "أدخل الموجود أمامك الآن. يسجل التطبيق فرق الجرد فقط ويكمل الخصم من الرصيد المصحح، دون مصروف أو سداد جديد. إذا كانت الزيادة من شراء فاستخدم «مشتريات المخزون» من المصروفات."
         : "أكد الموجود أمامك الآن لبدء الخصم التلقائي من الغد حسب خطط التغذية. لا يخصم التطبيق الأيام السابقة أو تغذية اليوم مرة أخرى. هذه مطابقة كمية فقط؛ لا تسجل مصروف شراء أو دفعة مالية.",
       submit: (d) => execute({ action: "stock.reconcile", id: m.id, data: d }),
     });
@@ -2009,6 +2012,7 @@ export default function App() {
                   <button
                     className="round-add"
                     aria-label="إضافة مصروف"
+                    hidden={expenseTab !== "other"}
                     disabled={expenseMonthClosed}
                     onClick={() => expenseForm()}
                   >
@@ -2016,7 +2020,7 @@ export default function App() {
                   </button>,
                 )}
                 <label className="period">
-                  شهر المصروف{" "}
+                  الفترة المعروضة{" "}
                   <input
                     type="month"
                     aria-label="شهر المصروف"
@@ -2026,7 +2030,30 @@ export default function App() {
                     }
                   />
                 </label>
-                <section className="card stock-purchase-entry"><h2>شراء مخزون وسداد قيمته</h2><p className="small muted">اختر الصنف، ثم أدخل الكمية والمبلغ المدفوع وتاريخ الشراء. تُضاف الكمية ويُسجل السداد مرة واحدة.</p><div className="actions">{s.mealTypes.filter(m=>!m.archived).map(m=><Button key={m.id} kind="outline" onClick={()=>purchase(m)}>شراء {m.name}</Button>)}</div></section>
+                <section className="card expense-total"><span>إجمالي تكلفة الفترة</span><strong>{money(financialSummary(s,month).plannedPayments)} ر.س</strong><div className="spread small"><span>مشتريات المخزون: {money(financialSummary(s,month).purchases)} ر.س</span><span>مصروفات أخرى: {money(financialSummary(s,month).other)} ر.س</span></div></section>
+                <div className="expense-tabs" role="tablist" aria-label="أنواع المصروفات">
+                  <button id="expenses-other" role="tab" aria-selected={expenseTab === "other"} aria-controls="expenses-other-panel" onClick={()=>setExpenseTab("other")}>المصروفات الأخرى</button>
+                  <button id="expenses-stock" role="tab" aria-selected={expenseTab === "stock"} aria-controls="expenses-stock-panel" onClick={()=>setExpenseTab("stock")}>مشتريات المخزون</button>
+                </div>
+                <div id="expenses-stock-panel" role="tabpanel" aria-labelledby="expenses-stock" hidden={expenseTab !== "stock"}>
+                  <section className="card stock-purchase-entry"><div className="actions">{s.mealTypes.filter(m=>!m.archived).map(m=><Button key={m.id} kind="outline" onClick={()=>purchase(m)}>شراء {m.name}</Button>)}</div>{!s.mealTypes.some(m=>!m.archived)&&<p>أضف صنفًا من المخزون ليظهر زر شرائه هنا.</p>}</section>
+                  <h2>عمليات الشراء المسجلة · {displayMonth(month)}</h2>
+                  {s.inventoryTransactions.filter(t=>t.movementKind==="purchase"&&(t.costPeriod||businessDay(t.paidAt).slice(0,7))===month).sort((a,b)=>String(b.paidAt).localeCompare(String(a.paidAt))).map(t=>{
+                    const latest=s.inventoryTransactions.find(x=>x.id===(t.latestCorrectionId||t.id))||t;
+                    return <section className="card" key={t.id}>
+                      <div className="spread"><h2>شراء {t.mealName}</h2><span className="pill">مسدد بالكامل</span></div>
+                      <p>الكمية: {displayQuantity(latest.correctedQuantity??t.amount)} {t.unit}</p>
+                      <div className="spread"><span>إجمالي المدفوع</span><b>{money(latest.correctedTotal??t.total)} ر.س</b></div>
+                      <p className="muted small">تاريخ الشراء والسداد: {displayDate(t.paidAt)}</p>
+                      <p className="muted small">يخص فترة: {displayMonth(t.costPeriod||businessDay(t.paidAt).slice(0,7))}{!t.costPeriod?" · سجل سابق بالتاريخ الأصلي":" · من 28 إلى 27"}</p>
+                      {t.latestCorrectionId&&<p className="small">تم التصحيح؛ السجل الأصلي والسبب محفوظان في حركات المخزون.</p>}
+                      {isAdmin&&<Button kind="outline" onClick={()=>correctPurchase(t)}>تصحيح عملية الشراء</Button>}
+                    </section>;
+                  })}
+                  {!s.inventoryTransactions.some(t=>t.movementKind==="purchase"&&(t.costPeriod||businessDay(t.paidAt).slice(0,7))===month)&&<section className="card"><p>لا توجد مشتريات مسجلة لهذه الفترة.</p></section>}
+                  {s.inventoryTransactions.filter(t=>t.movementKind==="purchase_correction"&&t.closedPeriodSettlement&&t.cashDelta!==0&&t.settlementPeriod===month).map(t=><section className="card" key={t.id}><h2>تسوية شراء {t.mealName}</h2><p>فرق التصحيح: {money(t.cashDelta)} ر.س</p><p className="muted small">{t.reason} · {displayDate(t.createdAt)}</p><p className="small">تسوية سجل سابق؛ لا تعني شراء كمية أو دفع مبلغ جديد.</p></section>)}
+                </div>
+                <div id="expenses-other-panel" role="tabpanel" aria-labelledby="expenses-other" hidden={expenseTab !== "other"}>
                 {expenseMonthClosed && (
                   <p className="notice">
                     هذا الشهر محفوظ؛ تظهر تفاصيل المصروفات وقت إغلاقه. يمكن
@@ -2034,7 +2061,7 @@ export default function App() {
                     المغلق.
                   </p>
                 )}
-                {expenseState.expenses.map((e) => (
+                {expenseState.expenses.filter(e=>!isFeedPurchase(expenseState,e)).map((e) => (
                   <section className="card" key={e.id}>
                     <div className="spread">
                       <h2>{e.name}</h2>
@@ -2071,10 +2098,10 @@ export default function App() {
                     )}
                     <div className="payment-summary">
                       <span>
-                        سداد يخص {displayMonth(month)}: {money(expensePaid(s, e.id, month))}{" "}
+                        المسدد: {money(expensePaid(s, e.id, month))}{" "}
                         ر.س
                       </span>
-                      <b>
+                      {expensePlan(s,e,month)<=expensePaid(s,e.id,month)?<b>مسدد بالكامل</b>:<b>
                         متبقي{" "}
                         {money(
                           Math.max(
@@ -2084,7 +2111,7 @@ export default function App() {
                           ),
                         )}{" "}
                         ر.س
-                      </b>
+                      </b>}
                     </div>
                     {!coveredFeedPlan(expenseState, e, month) &&
                       expensePlan(s, e, month) >
@@ -2139,8 +2166,8 @@ export default function App() {
                   {s.expensePayments
                     .filter(
                       (p) =>
-                        p.period === month ||
-                        String(p.paidAt).slice(0, 7) === month,
+                        p.cashCategory !== "inventory" && p.expenseKind !== "feed_purchase" && (p.period === month ||
+                        String(p.paidAt).slice(0, 7) === month),
                     )
                     .slice()
                     .sort((a, b) =>
@@ -2201,13 +2228,14 @@ export default function App() {
                     ))}
                   {!s.expensePayments.some(
                     (p) =>
-                      p.period === month ||
-                      String(p.paidAt).slice(0, 7) === month,
+                      p.cashCategory !== "inventory" && p.expenseKind !== "feed_purchase" && (p.period === month ||
+                      String(p.paidAt).slice(0, 7) === month),
                   ) && (
                     <p className="muted">لا توجد مدفوعات مسجلة لهذه الفترة.</p>
                   )}
                 </section>
                 {!s.expenses.length && <Empty />}
+                </div>
               </>
             )}
             {tab === "owners" && isStaff && (
@@ -2778,7 +2806,11 @@ function FormView({
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const update = (name: string, value: unknown) =>
-    set((p) => ({ ...p, [name]: value }));
+    set((p) => ({ ...p, [name]: value,
+      ...(name === "paidAt" && form.fields.some(f=>f.name==="costPeriod") && !p.costPeriodManual
+        ? {costPeriod:purchasePeriod(value)} : {}),
+      ...(name === "costPeriod" ? {costPeriodManual:true} : {}),
+    }));
   return (
     <form
       onSubmit={(e) => {

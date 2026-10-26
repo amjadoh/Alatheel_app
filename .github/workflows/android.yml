@@ -165,10 +165,12 @@ jobs:
           gh release download v1.9.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.9.0.apk -D previous
           gh release download v1.10.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.10.0.apk -D previous
           gh release download v1.10.1 -R "$GITHUB_REPOSITORY" -p Alatheel-1.10.1.apk -D previous
+          gh release download v1.11.0 -R "$GITHUB_REPOSITORY" -p Alatheel-1.11.0.apk -D previous
           printf '%s\n' '7a4704da10119300389b39fc0526810c87f9831b1eb2dd828c2a8d01a9bc33e8  previous/Alatheel-1.7.0.apk' 'cd0c43f410502c52fe3f0b69a06c0e0f36e12c5953fd9ef36cd9a29bae2e5753  previous/Alatheel-1.8.1.apk' | sha256sum --check
           printf '%s\n' 'a1bb17e5d621e8729b6bd4ccd4c02907037e5bf78a220a455b8b083d514f8fca  previous/Alatheel-1.9.0.apk' | sha256sum --check
           printf '%s\n' 'b071b52b824fdb1ddb116cd874db202e26bddc6e5b7d0f9ab4a85cebf4fc18dc  previous/Alatheel-1.10.0.apk' | sha256sum --check
           printf '%s\n' 'e704dad00e381ecfcbc58b530751b069a82f939c98a7095d0dace655e93f49fe  previous/Alatheel-1.10.1.apk' | sha256sum --check
+          printf '%s\n' '44840aaf729ceea08bb47c99b03c0c0edce3fb470ab37a10931b2129d7ba31f1  previous/Alatheel-1.11.0.apk' | sha256sum --check
       - name: Verify upgrade, cold startup and outdated WebView recovery
         shell: bash
         env:

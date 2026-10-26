@@ -11,7 +11,7 @@ import {
   financialSummary,
   cashCategory,
 } from "./finance";
-import { businessDay } from "./dates";
+import { businessDay, purchasePeriod } from "./dates";
 import { horseAccount, planPayment, accountRevision, isReceipt, preserveAccountCharges, refreshAccountBalance } from "./accounts";
 import {
   financialActions,
@@ -590,6 +590,10 @@ export function applyCommand(
       ensure(total <= 1000000, "قيمة الشراء تتجاوز حد العملية");
       ensure(paidAt <= today, "لا يمكن تسجيل شراء بتاريخ مستقبلي");
       assertOpenPeriod(s, paidAt);
+      const costPeriod = String(d.costPeriod || purchasePeriod(paidAt));
+      ensure(/^\d{4}-(0[1-9]|1[0-2])$/.test(costPeriod), "حدد الفترة التي يخصها الشراء");
+      assertOpenPeriod(s, costPeriod + "-01");
+      ensure(!accountingStart(s) || costPeriod >= accountingStart(s).slice(0, 7), "الفترة تسبق بداية الحسابات");
       ensure(
         ["bank", "cash", "card", "other"].includes(d.method),
         "حدد طريقة الدفع",
@@ -625,6 +629,7 @@ export function applyCommand(
         allocations: {},
         collectedHorseIds: [],
         incurredAt: paidAt,
+        costPeriod,
         lockedForPayments: true,
         ...purchase,
         createdAt: now,
@@ -635,7 +640,7 @@ export function applyCommand(
         expenseId,
         expenseName: "شراء " + m.name,
         amount: total,
-        period: paidAt.slice(0, 7),
+        period: costPeriod,
         paidAt,
         expenseKind: "feed_purchase",
         cashCategory: "inventory",
@@ -652,6 +657,7 @@ export function applyCommand(
         mealName: m.name,
         type: "add",
         movementKind: "purchase",
+        costPeriod,
         amount,
         total,
         paidAt,
@@ -695,13 +701,14 @@ export function applyCommand(
       const balance = stockPrecision(Number(meal.currentStock || 0) + stockDelta);
       ensure(balance >= 0, "التصحيح يجعل الرصيد سالبًا؛ طابق الموجود فعليًا أولًا ثم صحح الشراء");
       const delta = money(total - oldTotal);
-      const closed = s.financialPeriods.some(p => p.id === businessDay(original.paidAt).slice(0,7) && p.closed);
+      const originalPeriod = expense.costPeriod || businessDay(original.paidAt).slice(0,7);
+      const closed = s.financialPeriods.some(p => [originalPeriod, businessDay(original.paidAt).slice(0,7)].includes(p.id) && p.closed);
       const record: Row = { id:c.requestId, mealTypeId:meal.id, mealName:meal.name,
         movementKind:"purchase_correction", type:stockDelta < 0 ? "remove" : "add", amount:Math.abs(stockDelta),
         stockDelta, quantityDelta, correctedQuantity:amount, correctedTotal:total,
         previousQuantity:oldQuantity, previousTotal:oldTotal, originalPurchaseId:id, previousCorrectionId:currentId,
         reason, performedBy:a.uid, createdAt:now, paidAt:original.paidAt, unit:original.unit,
-        balance, settlementPeriod:closed ? today.slice(0,7) : businessDay(original.paidAt).slice(0,7),
+        balance, settlementPeriod:closed ? today.slice(0,7) : originalPeriod,
         stockCountPreserved:reconciled, cashDelta:delta, closedPeriodSettlement:closed,
         previousExpense:structuredClone(expense), previousPayment:structuredClone(payment) };
       if (closed && delta !== 0) {
