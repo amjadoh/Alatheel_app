@@ -71,3 +71,4 @@
 .clear-light [role="tabpanel"][hidden]{display:none!important}
 .clear-light .expense-total{background:var(--gold-soft)}
 .clear-light .expense-total>strong{display:block;font-size:28px;margin:10px 0;color:var(--ink)}
+.clear-light .round-add[hidden]{display:none!important}

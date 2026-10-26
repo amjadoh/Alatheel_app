@@ -205,6 +205,7 @@ async function main() {
             .getByRole("button", { name: "المصروفات", exact: true })
             .click();
           await page.getByRole("tab",{name:"مشتريات المخزون",exact:true}).click();
+          assert.equal(await page.getByRole("button",{name:"إضافة مصروف",exact:true}).count(),0);
           await page
             .getByRole("button", { name: /^شراء / }).first()
             .click();
