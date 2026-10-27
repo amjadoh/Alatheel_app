@@ -5,8 +5,8 @@ import { updateManifest } from "../scripts/update-manifest.mjs";
 
 test("update manifest binds the immutable release URL, byte count, and checksum", () => {
   const m = updateManifest(Buffer.from("abc"), "1.4.0", 5, "notes");
-  assert.equal(m.packageId, "com.alatheel.stable");
   assert.equal(m.channel, "stable");
+  assert.equal(m.packageId, "com.alatheel.stable");
   assert.equal(m.versionCode, 5);
   assert.equal(
     m.url,
@@ -18,8 +18,8 @@ test("update manifest binds the immutable release URL, byte count, and checksum"
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
   );
 });
-test("beta manifest uses its isolated channel path", () => {
-  const m = updateManifest(Buffer.from("abc"), "1.5.0", 6, "beta", "beta");
+test("beta manifest uses an isolated lane and identifies its channel", () => {
+  const m = updateManifest(Buffer.from("abc"), "1.5.0", 6, "preview", "beta");
   assert.equal(m.channel, "beta");
   assert.equal(
     m.url,

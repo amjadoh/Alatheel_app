@@ -15,12 +15,17 @@ import { App as NativeApp } from "@capacitor/app";
 import { Download, RefreshCw } from "lucide-react";
 import { RELEASE_VERSION } from "./release-notes";
 import {
-  normalizeUpdateChannel,
   retainRequiredUpdate,
   shouldCheckUpdate,
-  UpdateChannel,
   UpdateCheckReason,
 } from "./update-check-policy";
+import {
+  DEFAULT_UPDATE_CHANNEL,
+  readUpdateChannel,
+  UpdateChannel,
+  updateChannelForAccess,
+  writeUpdateChannel,
+} from "./update-channel";
 
 type Release = {
   available: boolean;
@@ -39,60 +44,86 @@ export interface UpdaterPlugin {
 }
 const Updater = registerPlugin<UpdaterPlugin>("AppUpdater");
 const isAndroid = Capacitor.getPlatform() === "android";
-const CHANNEL_KEY = "alatheel.update.channel";
-const UpdateContext = createContext({
+type UpdateContextValue = {
+  enabled: boolean;
+  check: () => void;
+  busy: boolean;
+  message: string;
+  checking: boolean;
+  verified: boolean;
+  blocked: boolean;
+  channel: UpdateChannel;
+  canChooseChannel: boolean;
+  setChannel: (channel: UpdateChannel) => void;
+  setPrimaryAccess: (primaryAdmin: boolean) => void;
+};
+const UpdateContext = createContext<UpdateContextValue>({
+  enabled: isAndroid,
   check: () => {},
   busy: false,
   message: "",
   checking: false,
   verified: true,
   blocked: false,
-  channel: "stable" as UpdateChannel,
-  selectChannel: (_: UpdateChannel) => {},
+  channel: DEFAULT_UPDATE_CHANNEL,
+  canChooseChannel: false,
+  setChannel: () => {},
+  setPrimaryAccess: () => {},
 });
 export const useAppUpdate = () => useContext(UpdateContext);
 
 export function UpdateButton() {
-  const { check, busy, message } = useContext(UpdateContext);
-  if (!isAndroid) return null;
+  const {
+    enabled,
+    check,
+    busy,
+    message,
+    channel,
+    canChooseChannel,
+    setChannel,
+  } = useContext(UpdateContext);
+  if (!enabled) return null;
   return (
     <section className="card update-card">
       <h3>تحديث التطبيق</h3>
       <p className="muted small">
         الإصدار {RELEASE_VERSION} · يجري التحقق عند فتح التطبيق
       </p>
-      <UpdateChannelControl />
+      <fieldset className="update-channel" disabled={busy}>
+        <legend>قناة التحديث</legend>
+        <div
+          className={`update-channel-options${canChooseChannel ? "" : " single"}`}
+        >
+          <button
+            type="button"
+            className={`update-channel-option${channel === "stable" ? " selected" : ""}`}
+            aria-pressed={channel === "stable"}
+            onClick={() => setChannel("stable")}
+          >
+            Official
+          </button>
+          {canChooseChannel && (
+            <button
+              type="button"
+              className={`update-channel-option${channel === "beta" ? " selected" : ""}`}
+              aria-pressed={channel === "beta"}
+              onClick={() => setChannel("beta")}
+            >
+              Bata
+            </button>
+          )}
+        </div>
+        <p className="muted small">
+          {channel === "beta"
+            ? "إصدار مبكر للاختبار وقد يتضمن تغييرات غير نهائية"
+            : "الإصدار الرسمي المعتمد للاستخدام اليومي"}
+        </p>
+      </fieldset>
       <button className="button outline" disabled={busy} onClick={check}>
         <RefreshCw size={18} /> التحقق من التحديث
       </button>
       {message && <p role="status">{message}</p>}
     </section>
-  );
-}
-
-function UpdateChannelControl({ disabled = false }: { disabled?: boolean }) {
-  const { channel, selectChannel } = useContext(UpdateContext);
-  return (
-    <div className="update-channel" role="group" aria-label="قناة التحديث">
-      <button
-        type="button"
-        className={channel === "stable" ? "selected" : ""}
-        aria-pressed={channel === "stable"}
-        disabled={disabled}
-        onClick={() => selectChannel("stable")}
-      >
-        Official
-      </button>
-      <button
-        type="button"
-        className={channel === "beta" ? "selected" : ""}
-        aria-pressed={channel === "beta"}
-        disabled={disabled}
-        onClick={() => selectChannel("beta")}
-      >
-        Bata
-      </button>
-    </div>
   );
 }
 
@@ -107,6 +138,11 @@ export function UpdateGate({
 }) {
   const [checking, setChecking] = useState(android);
   const [verified, setVerified] = useState(!android);
+  const [channel, setChannelState] = useState<UpdateChannel>(
+    DEFAULT_UPDATE_CHANNEL,
+  );
+  const [canChooseChannel, setCanChooseChannel] = useState(false);
+  const canChooseChannelRef = useRef(false);
   const [release, setRelease] = useState<Release | null>(null);
   const [failedCheck, setFailedCheck] = useState(false);
   const [working, setWorking] = useState(false);
@@ -114,25 +150,23 @@ export function UpdateGate({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [instruction, setInstruction] = useState("");
-  const [channel, setChannel] = useState<UpdateChannel>(() =>
-    normalizeUpdateChannel(localStorage.getItem(CHANNEL_KEY)),
-  );
   const locked = useRef(false);
   const mounted = useRef(true);
   const lastSuccessAt = useRef<number | null>(null);
   const previousCheckFailed = useRef(false);
   const knownRelease = useRef<Release | null>(null);
+  const pendingForcedCheck = useRef(false);
+  const pendingChannel = useRef<UpdateChannel | null>(null);
   const channelRef = useRef(channel);
-  const pendingForcedCheck = useRef<UpdateChannel | null>(null);
   const check = async (
     reason: UpdateCheckReason = "startup",
-    requestedChannel = channelRef.current,
+    requestedChannel: UpdateChannel = channelRef.current,
   ) => {
     if (!android) return;
     if (locked.current) {
       // An update notification can arrive while a check/download is running.
       // Coalesce these requests and verify once the current operation finishes.
-      if (reason === "manual") pendingForcedCheck.current = requestedChannel;
+      if (reason === "manual") pendingForcedCheck.current = true;
       return;
     }
     if (
@@ -169,12 +203,59 @@ export function UpdateGate({
     } finally {
       locked.current = false;
       if (mounted.current) setChecking(false);
-      if (mounted.current && pendingForcedCheck.current) {
-        const pendingChannel = pendingForcedCheck.current;
-        pendingForcedCheck.current = null;
-        void check("manual", pendingChannel);
+      if (mounted.current && pendingChannel.current) {
+        const next = pendingChannel.current;
+        pendingChannel.current = null;
+        setChannel(next);
+      } else if (mounted.current && pendingForcedCheck.current) {
+        pendingForcedCheck.current = false;
+        void check("manual");
       }
     }
+  };
+  const setChannel = (
+    next: UpdateChannel,
+    persist = canChooseChannelRef.current,
+  ) => {
+    next = updateChannelForAccess(canChooseChannelRef.current, next);
+    if (locked.current) {
+      pendingChannel.current = next;
+      return;
+    }
+    if (next === channelRef.current) return;
+    channelRef.current = next;
+    setChannelState(next);
+    if (persist)
+      writeUpdateChannel(
+        typeof localStorage === "undefined" ? null : localStorage,
+        next,
+      );
+    knownRelease.current = null;
+    lastSuccessAt.current = null;
+    previousCheckFailed.current = false;
+    setRelease(null);
+    setFailedCheck(false);
+    setVerified(false);
+    setMessage("");
+    setInstruction("");
+    void check("manual", next);
+  };
+  const setPrimaryAccess = (primaryAdmin: boolean) => {
+    canChooseChannelRef.current = primaryAdmin;
+    setCanChooseChannel(primaryAdmin);
+    const stored = readUpdateChannel(
+      typeof localStorage === "undefined" ? null : localStorage,
+    );
+    const next = updateChannelForAccess(primaryAdmin, stored);
+    if (next === channelRef.current) {
+      pendingChannel.current = null;
+      return;
+    }
+    if (locked.current) {
+      pendingChannel.current = next;
+      return;
+    }
+    setChannel(next, primaryAdmin);
   };
   useEffect(() => {
     mounted.current = true;
@@ -192,21 +273,6 @@ export function UpdateGate({
       void resume.then((h) => h.remove());
     };
   }, []);
-  const selectChannel = (next: UpdateChannel) => {
-    if (next === channelRef.current) return;
-    channelRef.current = next;
-    localStorage.setItem(CHANNEL_KEY, next);
-    setChannel(next);
-    knownRelease.current = null;
-    setRelease(null);
-    setFailedCheck(false);
-    lastSuccessAt.current = null;
-    previousCheckFailed.current = false;
-    setError("");
-    setMessage("");
-    setInstruction("");
-    void check("manual", next);
-  };
   const update = async () => {
     if (locked.current || !release?.available) return;
     locked.current = true;
@@ -232,10 +298,13 @@ export function UpdateGate({
     } finally {
       locked.current = false;
       setWorking(false);
-      if (mounted.current && pendingForcedCheck.current) {
-        const pendingChannel = pendingForcedCheck.current;
-        pendingForcedCheck.current = null;
-        void check("manual", pendingChannel);
+      if (mounted.current && pendingChannel.current) {
+        const next = pendingChannel.current;
+        pendingChannel.current = null;
+        setChannel(next);
+      } else if (mounted.current && pendingForcedCheck.current) {
+        pendingForcedCheck.current = false;
+        void check("manual");
       }
     }
   };
@@ -244,6 +313,7 @@ export function UpdateGate({
   return (
     <UpdateContext.Provider
       value={{
+        enabled: android,
         check: () => void check("manual"),
         busy: checking || working,
         message,
@@ -251,7 +321,9 @@ export function UpdateGate({
         verified,
         blocked,
         channel,
-        selectChannel,
+        canChooseChannel,
+        setChannel,
+        setPrimaryAccess,
       }}
     >
       <div hidden={panelBlocked} inert={panelBlocked ? true : undefined}>
@@ -262,7 +334,6 @@ export function UpdateGate({
           <section className="card update-panel" aria-labelledby="update-title">
             <img src="/logo.jpeg" alt="شعار الأثيل" className="update-logo" />
             <p className="eyebrow">الأثيل · تحديث التطبيق</p>
-            <UpdateChannelControl disabled={working} />
             <h1 id="update-title">
               {checking
                 ? "جارٍ التحقق من الإصدار"
@@ -290,6 +361,14 @@ export function UpdateGate({
               <p className="update-error" role="alert">
                 {error}
               </p>
+            )}
+            {failedCheck && channel === "beta" && (
+              <button
+                className="button outline"
+                onClick={() => setChannel("stable")}
+              >
+                العودة إلى القناة المستقرة
+              </button>
             )}
             {instruction && <p role="status">{instruction}</p>}
             {!checking && !working && (

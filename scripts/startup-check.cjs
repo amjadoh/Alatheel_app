@@ -111,15 +111,12 @@ async function noActions(page) {
     assert.equal(result.downloads,0);assert.equal(result.installs,0);
     await context.close();
   });
-  await check("Stable is default and switching to beta rechecks and persists the selected channel",async()=>{
+  await check("Non-primary accounts remain on Official and cannot bypass a mandatory update",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"80",update:"required",updateAfterFirst:"current"});
     await page.getByRole("heading",{name:"حدّث التطبيق للمتابعة"}).waitFor();
     assert.deepEqual(await page.evaluate(()=>window.__startupQA.updateChannels),["stable"]);
-    await page.getByRole("button",{name:"Bata",exact:true}).click();
-    await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
-    const result=await page.evaluate(()=>({channels:window.__startupQA.updateChannels,stored:localStorage.getItem("alatheel.update.channel")}));
-    assert.deepEqual(result.channels,["stable","beta"]);
-    assert.equal(result.stored,"beta");
+    assert.equal(await page.getByRole("button",{name:"Bata",exact:true}).count(),0);
+    await noActions(page);
     await context.close();
   });
   await check("A failed initial update check stays blocked with a retry action",async()=>{
