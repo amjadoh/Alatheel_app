@@ -1,9 +1,16 @@
 # Repository workflow
 
-- Never push changes directly to `main`.
-- Create a feature branch and a pull request for every repository change.
-- Run the pull-request checks and do not merge until every required check passes.
+These rules are mandatory for every human or automated agent working on this repository.
+
+- Never commit or push changes directly to `main`.
+- Create a dedicated feature branch and open or update a pull request for every repository change.
+- Run the pull-request checks and do not merge until every required check passes. Diagnose failures, fix the branch when needed, and rerun failed checks before merging.
 - Keep release and deployment steps manual after verification.
+
+# Update channels
+
+- `Official` is the default stable update channel and continues to use `latest.json`.
+- `Bata` is the opt-in beta channel and uses `beta/latest.json` with APK files under `downloads/beta/`.
 
 # Release verification
 
