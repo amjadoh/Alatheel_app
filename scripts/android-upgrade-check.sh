@@ -5,6 +5,10 @@ python3 - <<'PY'
 from pathlib import Path
 import os
 version=__import__('json').loads(Path('package.json').read_text(encoding='utf-8'))['version']
+previous=[line.split()[0] for line in Path('scripts/android-upgrade-releases.txt').read_text(encoding='utf-8').splitlines() if line.strip()]
+first,*rest=previous
+pairs=" ".join(f'"previous/Alatheel-{item}.apk {item}"' for item in rest)+f' "apk/app-release.apk {version}"'
+chain=" -> ".join([*previous,version])
 p=Path("scripts/android-smoke.sh").read_text(encoding='utf-8')
 p=p.replace("system-images;android-35;google_apis;x86_64", "system-images;android-"+os.environ["ANDROID_QA_API"]+";google_apis;x86_64")
 p=p.replace("Signed APK installed and reached the Google sign-in screen without an Android crash.", "Signed APK upgraded in place and displayed the expected startup screen without an Android crash.")
@@ -22,17 +26,17 @@ install_checked() {
   local info="$(adb shell dumpsys package "$PACKAGE")"
   grep -Fq "versionName=$version" <<< "$info"
 }
-install_checked previous/Alatheel-1.7.0.apk 1.7.0
+install_checked previous/Alatheel-__FIRST__.apk __FIRST__
 FIRST_ID="$(identity | grep 'uid:')"
 FIRST_TIME="$(identity | grep 'firstInstallTime=')"
-for pair in "previous/Alatheel-1.8.1.apk 1.8.1" "previous/Alatheel-1.9.0.apk 1.9.0" "previous/Alatheel-1.10.0.apk 1.10.0" "previous/Alatheel-1.10.1.apk 1.10.1" "previous/Alatheel-1.11.0.apk 1.11.0" "apk/app-release.apk 1.8.2"; do
+for pair in __PAIRS__; do
   read -r file version <<< "$pair"
   install_checked "$file" "$version"
   test "$FIRST_ID" = "$(identity | grep 'uid:')"
   test "$FIRST_TIME" = "$(identity | grep 'firstInstallTime=')"
 done
-printf "PASS: 1.7.0 -> 1.8.1 -> 1.9.0 -> 1.10.0 -> 1.10.1 -> 1.11.0 -> 1.8.2; UID and firstInstallTime retained without uninstall or data clear.\n" > android-qa/upgrade-result.txt
-'''.replace('1.8.2', version))
+printf "PASS: __CHAIN__; UID and firstInstallTime retained without uninstall or data clear.\n" > android-qa/upgrade-result.txt
+'''.replace('__FIRST__',first).replace('__PAIRS__',pairs).replace('__CHAIN__',chain))
 needle='printf \'Signed APK upgraded'
 # Add a full process stop/reopen before the final successful smoke result.
 pos=p.index(needle)

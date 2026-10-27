@@ -2,16 +2,12 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
-const { createRequire } = require("node:module");
-const requireQA = process.env.QA_NODE_MODULES ? createRequire(path.join(process.env.QA_NODE_MODULES,"_qa.cjs")) : require;
-const { chromium } = requireQA("playwright");
+const { launchBrowser, startVite } = require("./ui-harness.cjs");
 const output = path.resolve(process.env.QA_OUTPUT || "qa-results");
 const base = process.env.QA_BASE_URL || `http://127.0.0.1:${process.env.QA_STARTUP_PORT || 5194}`;
 const report = {scope:"Isolated simulated app startup; not a measurement on the user's phone",checks:[],measurements:[],errors:[]};
 let server, browser;
 fs.mkdirSync(output,{recursive:true});
-const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
 async function check(name, fn) { await fn(); report.checks.push(name); console.log("PASS",name); }
 async function open(parameters = {}, width = 390) {
   const context = await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
@@ -34,13 +30,8 @@ async function noActions(page) {
   assert.equal(await page.locator(".quick-actions:visible").count(),0);
 }
 (async()=>{
-  if(!process.env.QA_BASE_URL) {
-    server=spawn(process.execPath,["node_modules/vite/bin/vite.js","--config","vite.qa.config.ts","--port",new URL(base).port,"--strictPort"],{stdio:"ignore"});
-    let ready=false;
-    for(let i=0;i<120;i++) { try { if((await fetch(base+"/tests/ui/startup.html")).ok){ready=true;break;} } catch {} await pause(200); }
-    assert.ok(ready,"Isolated startup server did not start");
-  }
-  browser=await chromium.launch({headless:true,...(process.env.QA_CHROME?{executablePath:process.env.QA_CHROME}:{})});
+  server=await startVite(base,"/tests/ui/startup.html",{error:"Isolated startup server did not start"});
+  browser=await launchBrowser();
   for(const width of [320,390,430]) {
     const {page,context}=await open({authDelay:"900",dataDelay:"1600",readyDelay:"2200",updateDelay:"300"},width);
     await check(`Branded startup fits RTL at ${width}px without a sign-in or financial-data flash`,async()=>{

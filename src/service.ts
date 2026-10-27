@@ -67,8 +67,7 @@ const auth = persistentAuth?.auth || null,
       )
     : null;
 let state: State = emptyState(),
-  actor: Actor | null = null,
-  user: User | null = null;
+  actor: Actor | null = null;
 let authError: string | undefined;
 let authPhase: AuthPhase = "restoring";
 let retryAuthentication = () => {};
@@ -113,7 +112,6 @@ export function connect(callback: typeof emit) {
     expiresAt = 0;
     clearTimeout(retryTimer); clearTimeout(sessionTimer);
     stop(); dataGate = undefined;
-    user = current;
     actor = null;
     state = emptyState();
     startupProgress = { stage: "session", completed: 0, total: 1 };

@@ -3,9 +3,9 @@ import { accountingStart } from '../functions/src/accounting-boundary';
 import './clear-light.css';
 import { TERMS } from "./terms";
 import { NotificationsPanel,useStaffNotifications } from "./notifications";
-import { displayAmount, displayNumber, displayQuantity, displayPrice, displayDate, displayMonth, isolateNumber, displayDateTime, displayIdentifier } from "./format";
+import { displayAmount, displayNumber, displayQuantity, displayPrice, displayDate, displayMonth, displayDateTime, displayIdentifier } from "./format";
 import { FeedingEditor, FeedingPlanSummary, feedingFormError } from "./feeding-editor";
-import { feedingAtDate, feedingOnDate, scheduledFeedingDates } from "../functions/src/feeding";
+import { feedingAtDate, feedingOnDate, feedingMeasure, feedingUnitPrice, expenseFeedMeal } from "../functions/src/feeding";
 import { useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { inventoryNeeds } from "../functions/src/inventory-needs";
 import { InventoryDashboard, InventoryItemNeeds, InventoryRunwayPanel } from "./inventory-dashboard";
@@ -29,7 +29,6 @@ import {
   SlidersHorizontal,
   Download,
   Check,
-  Archive,
   History,
   ShieldCheck,
   MessageSquareText,
@@ -50,7 +49,6 @@ import {
   State,
   Row,
   staff,
-  bill,
   nextMonth,
 } from "./service";
 import { HorseAccount, ReceiptDetails } from "./account-ui";
@@ -61,17 +59,7 @@ import { receiptCash } from "../functions/src/receipt-cash";
 import { financialSummary } from "../functions/src/finance";
 import { emptyState } from "../functions/src/domain";
 import { PRIMARY_ADMIN_EMAIL } from "../functions/src/access";
-import {
-  costs,
-  horseCost,
-  feedingMeasure,
-  feedingUnitPrice,
-  monthlyExpense,
-  expenseIsShared,
-  isFeedPurchase,
-  coveredFeedPlan,
-  expenseFeedMeal,
-} from "./metrics";
+import { costs, horseCost, expenseIsShared, isFeedPurchase, coveredFeedPlan } from "../functions/src/estimates";
 import { exportExcel, exportPdf } from "./export";
 import { UpdateButton,useAppUpdate } from "./updates";
 import {

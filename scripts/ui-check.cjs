@@ -2,12 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { createRequire } = require("node:module");
-const { spawn } = require("node:child_process");
-const requireQA = process.env.QA_NODE_MODULES
-  ? createRequire(path.join(process.env.QA_NODE_MODULES, "_qa.cjs"))
-  : require;
-const { chromium } = requireQA("playwright");
+const { launchBrowser, startVite } = require("./ui-harness.cjs");
 const output = path.resolve(process.env.QA_OUTPUT || "qa-results");
 fs.mkdirSync(output, { recursive: true });
 const base = process.env.QA_BASE_URL || `http://127.0.0.1:${process.env.QA_PORT || 5174}`;
@@ -22,28 +17,8 @@ async function snapshot(page) {
   return page.evaluate(() => window.__alatheelQA());
 }
 async function main() {
-  if (!process.env.QA_BASE_URL) {
-    server = spawn(
-      process.execPath,
-      ["node_modules/vite/bin/vite.js", "--config", "vite.qa.config.ts", "--port", new URL(base).port],
-      { stdio: "ignore" },
-    );
-    let ready = false;
-    for (let i = 0; i < 100; i++) {
-      try {
-        if ((await fetch(base + "/tests/ui/app.html")).ok) {
-          ready = true;
-          break;
-        }
-      } catch {}
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    assert.ok(ready, "QA app server did not start");
-  }
-  browser = await chromium.launch({
-    headless: true,
-    ...(process.env.QA_CHROME ? { executablePath: process.env.QA_CHROME } : {}),
-  });
+  server = await startVite(base, "/tests/ui/app.html", { attempts: 100, error: "QA app server did not start" });
+  browser = await launchBrowser();
   for (const width of [320, 390, 430]) {
     const context = await browser.newContext({
       viewport: { width, height: 844 },

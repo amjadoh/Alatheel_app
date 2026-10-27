@@ -18,12 +18,11 @@ import {
 } from "../functions/src/finance";
 import {
   horseCost,
-  feedingMeasure,
-  feedingUnitPrice,
   monthlyExpense,
   expenseIsShared,
   isFeedPurchase,
-} from "./metrics";
+} from "../functions/src/estimates";
+import { feedingMeasure, feedingUnitPrice } from "../functions/src/feeding";
 export async function exportExcel(
   s: State,
   month: string,

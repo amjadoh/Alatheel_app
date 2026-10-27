@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
-import { MessageSquareText, Plus, ImagePlus, Paperclip, X, FileText, Send, ExternalLink, Copy, ArrowRight, RefreshCw } from "lucide-react";
+import { MessageSquareText, Plus, ImagePlus, Paperclip, X, FileText, Send, Copy, ArrowRight, RefreshCw } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";

@@ -1,13 +1,8 @@
 const assert = require("node:assert/strict"),
   fs = require("node:fs/promises"),
   path = require("node:path"),
-  os = require("node:os"),
-  { spawn } = require("node:child_process"),
-  { createRequire } = require("node:module");
-const requireQA = process.env.QA_NODE_MODULES
-  ? createRequire(path.join(process.env.QA_NODE_MODULES, "_qa.cjs"))
-  : require;
-const { chromium } = requireQA("playwright");
+  os = require("node:os");
+const { chromium, startVite } = require("./ui-harness.cjs");
 const base = `http://127.0.0.1:${process.env.QA_AUTH_PORT || 5184}`,
   report = { checks: [], errors: [] };
 let server, context, profile;
@@ -157,25 +152,7 @@ function pass(name) {
   console.log("PASS", name);
 }
 (async () => {
-  server = spawn(
-    process.execPath,
-    [
-      "node_modules/vite/bin/vite.js",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      new URL(base).port,
-      "--strictPort",
-    ],
-    { stdio: "ignore" },
-  );
-  for (let i = 0; i < 160; i++) {
-    try {
-      if ((await fetch(base)).ok) break;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 250));
-    if (i === 159) throw new Error("Auth test server did not start");
-  }
+  server = await startVite(base, "/", { force: true, attempts: 160, delay: 250, error: "Auth test server did not start" });
   await fresh();
   let page = await launch();
   await open(page);
