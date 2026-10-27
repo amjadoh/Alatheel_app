@@ -36,6 +36,7 @@ public class AppUpdaterPlugin extends Plugin {
     private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean downloading = new AtomicBoolean(false);
     private volatile JSONObject release;
+    private volatile String releaseChannel;
 
     private File apk() { return new File(getContext().getCacheDir(), "alatheel-update.apk"); }
     private File metadata() { return new File(getContext().getCacheDir(), "alatheel-update.json"); }
@@ -62,11 +63,13 @@ public class AppUpdaterPlugin extends Plugin {
     private long installed() throws Exception {
         return code(getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0));
     }
-    private JSONObject valid(JSONObject m) throws Exception {
+    private JSONObject valid(JSONObject m, String expectedChannel) throws Exception {
         int version = m.getInt("versionCode");
         String name = m.getString("versionName");
+        String channel = m.optString("channel", "stable");
+        if (!channel.equals(expectedChannel)) throw new IOException("Wrong update channel");
         if (!UpdatePolicy.valid(version, name, m.getString("packageId"), m.getString("url"),
-                m.getString("sha256"), m.getLong("size"))) throw new IOException("Invalid update metadata");
+                m.getString("sha256"), m.getLong("size"), channel)) throw new IOException("Invalid update metadata");
         return m;
     }
     private String hex(byte[] bytes) {
@@ -101,6 +104,7 @@ public class AppUpdaterPlugin extends Plugin {
     @PluginMethod
     public void check(PluginCall call) {
         android.util.Log.i("AlatheelUpdater", "Metadata check requested");
+        String channel = UpdatePolicy.channel(call.getString("channel"));
         // The small metadata request must not borrow APK download timeouts.
         // A total deadline also bounds DNS/TLS stalls and slowly trickled bytes.
         AtomicBoolean settled = new AtomicBoolean(false);
@@ -114,7 +118,7 @@ public class AppUpdaterPlugin extends Plugin {
         worker.execute(() -> {
             try {
                 if (settled.get()) return;
-                HttpURLConnection c = open(HOST + "/latest.json", UpdatePolicy.METADATA_CONNECT_TIMEOUT_MS,
+                HttpURLConnection c = open(HOST + UpdatePolicy.manifestPath(channel), UpdatePolicy.METADATA_CONNECT_TIMEOUT_MS,
                         UpdatePolicy.METADATA_READ_TIMEOUT_MS, connection);
                 ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                 try (InputStream in = c.getInputStream()) {
@@ -124,8 +128,9 @@ public class AppUpdaterPlugin extends Plugin {
                         if (buffer.size() > 16384) throw new IOException("Metadata too large");
                     }
                 }
-                JSONObject next = valid(new JSONObject(buffer.toString("UTF-8")));
-                if (release != null && next.getInt("versionCode") < release.getInt("versionCode"))
+                JSONObject next = valid(new JSONObject(buffer.toString("UTF-8")), channel);
+                if (release != null && channel.equals(releaseChannel)
+                        && next.getInt("versionCode") < release.getInt("versionCode"))
                     throw new IOException("Outdated update metadata");
                 JSObject result = new JSObject();
                 result.put("available", next.getInt("versionCode") > installed());
@@ -134,6 +139,7 @@ public class AppUpdaterPlugin extends Plugin {
                 result.put("ready", next.getInt("versionCode") > installed() && ready(next));
                 if (settled.compareAndSet(false, true)) {
                     release = next;
+                    releaseChannel = channel;
                     call.resolve(result);
                 }
             } catch (Exception e) {
@@ -204,7 +210,8 @@ public class AppUpdaterPlugin extends Plugin {
                         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
                         byte[] b = new byte[4096]; int n;
                         while ((n = in.read(b)) != -1) bytes.write(b, 0, n);
-                        target = valid(new JSONObject(bytes.toString("UTF-8")));
+                        JSONObject cached = new JSONObject(bytes.toString("UTF-8"));
+                        target = valid(cached, cached.optString("channel", "stable"));
                     }
                 }
                 if (target == null) throw new IOException("Download first");

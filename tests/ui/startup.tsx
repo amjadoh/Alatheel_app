@@ -14,6 +14,7 @@ const params = new URLSearchParams(location.search);
 const qa = {
   timings: { mounted: performance.now() } as Record<string, number>,
   updateChecks: 0,
+  updateChannels: [] as string[],
   downloads: 0,
   installs: 0,
 };
@@ -21,8 +22,9 @@ const qa = {
 markReleaseNotesRead(localStorage);
 let downloaded = false;
 const updater: UpdaterPlugin = {
-  async check() {
+  async check({ channel }) {
     qa.updateChecks++;
+    qa.updateChannels.push(channel);
     qa.timings.updateStarted = performance.now();
     await new Promise((resolve) => setTimeout(resolve, Number(params.get("updateDelay") || 160)));
     qa.timings.updateFinished = performance.now();

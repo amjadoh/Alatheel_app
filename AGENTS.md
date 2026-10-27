@@ -1,3 +1,10 @@
+# Repository workflow
+
+- Never push changes directly to `main`.
+- Create a feature branch and a pull request for every repository change.
+- Run the pull-request checks and do not merge until every required check passes.
+- Keep release and deployment steps manual after verification.
+
 # Release verification
 
 The user requires that releases are withheld until the changed workflows work and financial checks pass. A successful build alone is insufficient.

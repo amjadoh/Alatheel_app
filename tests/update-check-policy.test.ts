@@ -1,10 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  normalizeUpdateChannel,
   retainRequiredUpdate,
   shouldCheckUpdate,
   UPDATE_RESUME_TTL_MS,
 } from "../src/update-check-policy";
+
+test("stable is the default update channel and beta is explicit", () => {
+  assert.equal(normalizeUpdateChannel(null), "stable");
+  assert.equal(normalizeUpdateChannel("stable"), "stable");
+  assert.equal(normalizeUpdateChannel("unknown"), "stable");
+  assert.equal(normalizeUpdateChannel("beta"), "beta");
+});
 
 test("cold startup always verifies, even if supplied a recent successful time", () => {
   assert.equal(shouldCheckUpdate("startup", null, 1000), true);
