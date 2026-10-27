@@ -14,7 +14,13 @@ import {
 import { App as NativeApp } from "@capacitor/app";
 import { Download, RefreshCw } from "lucide-react";
 import { RELEASE_VERSION } from "./release-notes";
-import { retainRequiredUpdate, shouldCheckUpdate, UpdateCheckReason } from "./update-check-policy";
+import {
+  normalizeUpdateChannel,
+  retainRequiredUpdate,
+  shouldCheckUpdate,
+  UpdateChannel,
+  UpdateCheckReason,
+} from "./update-check-policy";
 
 type Release = {
   available: boolean;
@@ -23,7 +29,7 @@ type Release = {
   ready: boolean;
 };
 export interface UpdaterPlugin {
-  check(): Promise<Release>;
+  check(options: { channel: UpdateChannel }): Promise<Release>;
   download(): Promise<void>;
   install(): Promise<{ permissionRequired: boolean }>;
   addListener(
@@ -33,6 +39,7 @@ export interface UpdaterPlugin {
 }
 const Updater = registerPlugin<UpdaterPlugin>("AppUpdater");
 const isAndroid = Capacitor.getPlatform() === "android";
+const CHANNEL_KEY = "alatheel.update.channel";
 const UpdateContext = createContext({
   check: () => {},
   busy: false,
@@ -40,6 +47,8 @@ const UpdateContext = createContext({
   checking: false,
   verified: true,
   blocked: false,
+  channel: "stable" as UpdateChannel,
+  selectChannel: (_: UpdateChannel) => {},
 });
 export const useAppUpdate = () => useContext(UpdateContext);
 
@@ -49,12 +58,41 @@ export function UpdateButton() {
   return (
     <section className="card update-card">
       <h3>تحديث التطبيق</h3>
-      <p className="muted small">الإصدار {RELEASE_VERSION} · يجري التحقق عند فتح التطبيق</p>
+      <p className="muted small">
+        الإصدار {RELEASE_VERSION} · يجري التحقق عند فتح التطبيق
+      </p>
+      <UpdateChannelControl />
       <button className="button outline" disabled={busy} onClick={check}>
         <RefreshCw size={18} /> التحقق من التحديث
       </button>
       {message && <p role="status">{message}</p>}
     </section>
+  );
+}
+
+function UpdateChannelControl({ disabled = false }: { disabled?: boolean }) {
+  const { channel, selectChannel } = useContext(UpdateContext);
+  return (
+    <div className="update-channel" role="group" aria-label="قناة التحديث">
+      <button
+        type="button"
+        className={channel === "stable" ? "selected" : ""}
+        aria-pressed={channel === "stable"}
+        disabled={disabled}
+        onClick={() => selectChannel("stable")}
+      >
+        Official
+      </button>
+      <button
+        type="button"
+        className={channel === "beta" ? "selected" : ""}
+        aria-pressed={channel === "beta"}
+        disabled={disabled}
+        onClick={() => selectChannel("beta")}
+      >
+        Bata
+      </button>
+    </div>
   );
 }
 
@@ -76,28 +114,43 @@ export function UpdateGate({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [instruction, setInstruction] = useState("");
+  const [channel, setChannel] = useState<UpdateChannel>(() =>
+    normalizeUpdateChannel(localStorage.getItem(CHANNEL_KEY)),
+  );
   const locked = useRef(false);
   const mounted = useRef(true);
   const lastSuccessAt = useRef<number | null>(null);
   const previousCheckFailed = useRef(false);
   const knownRelease = useRef<Release | null>(null);
-  const pendingForcedCheck = useRef(false);
-  const check = async (reason: UpdateCheckReason = "startup") => {
+  const channelRef = useRef(channel);
+  const pendingForcedCheck = useRef<UpdateChannel | null>(null);
+  const check = async (
+    reason: UpdateCheckReason = "startup",
+    requestedChannel = channelRef.current,
+  ) => {
     if (!android) return;
     if (locked.current) {
       // An update notification can arrive while a check/download is running.
       // Coalesce these requests and verify once the current operation finishes.
-      if (reason === "manual") pendingForcedCheck.current = true;
+      if (reason === "manual") pendingForcedCheck.current = requestedChannel;
       return;
     }
-    if (!shouldCheckUpdate(reason, lastSuccessAt.current, Date.now(), previousCheckFailed.current)) return;
+    if (
+      !shouldCheckUpdate(
+        reason,
+        lastSuccessAt.current,
+        Date.now(),
+        previousCheckFailed.current,
+      )
+    )
+      return;
     locked.current = true;
     setChecking(true);
     setError("");
     setMessage("");
     try {
-      const incoming = await client.check();
-      if (!mounted.current) return;
+      const incoming = await client.check({ channel: requestedChannel });
+      if (!mounted.current || requestedChannel !== channelRef.current) return;
       const result = retainRequiredUpdate(knownRelease.current, incoming);
       knownRelease.current = result;
       lastSuccessAt.current = Date.now();
@@ -108,7 +161,7 @@ export function UpdateGate({
       if (reason === "manual" && !result.available)
         setMessage("تستخدم أحدث إصدار من التطبيق");
     } catch (e) {
-      if (mounted.current) {
+      if (mounted.current && requestedChannel === channelRef.current) {
         previousCheckFailed.current = true;
         setFailedCheck(true);
         setError((e as Error).message || "تعذر التحقق من التحديث");
@@ -117,8 +170,9 @@ export function UpdateGate({
       locked.current = false;
       if (mounted.current) setChecking(false);
       if (mounted.current && pendingForcedCheck.current) {
-        pendingForcedCheck.current = false;
-        void check("manual");
+        const pendingChannel = pendingForcedCheck.current;
+        pendingForcedCheck.current = null;
+        void check("manual", pendingChannel);
       }
     }
   };
@@ -138,6 +192,21 @@ export function UpdateGate({
       void resume.then((h) => h.remove());
     };
   }, []);
+  const selectChannel = (next: UpdateChannel) => {
+    if (next === channelRef.current) return;
+    channelRef.current = next;
+    localStorage.setItem(CHANNEL_KEY, next);
+    setChannel(next);
+    knownRelease.current = null;
+    setRelease(null);
+    setFailedCheck(false);
+    lastSuccessAt.current = null;
+    previousCheckFailed.current = false;
+    setError("");
+    setMessage("");
+    setInstruction("");
+    void check("manual", next);
+  };
   const update = async () => {
     if (locked.current || !release?.available) return;
     locked.current = true;
@@ -164,8 +233,9 @@ export function UpdateGate({
       locked.current = false;
       setWorking(false);
       if (mounted.current && pendingForcedCheck.current) {
-        pendingForcedCheck.current = false;
-        void check("manual");
+        const pendingChannel = pendingForcedCheck.current;
+        pendingForcedCheck.current = null;
+        void check("manual", pendingChannel);
       }
     }
   };
@@ -180,6 +250,8 @@ export function UpdateGate({
         checking,
         verified,
         blocked,
+        channel,
+        selectChannel,
       }}
     >
       <div hidden={panelBlocked} inert={panelBlocked ? true : undefined}>
@@ -190,6 +262,7 @@ export function UpdateGate({
           <section className="card update-panel" aria-labelledby="update-title">
             <img src="/logo.jpeg" alt="شعار الأثيل" className="update-logo" />
             <p className="eyebrow">الأثيل · تحديث التطبيق</p>
+            <UpdateChannelControl disabled={working} />
             <h1 id="update-title">
               {checking
                 ? "جارٍ التحقق من الإصدار"

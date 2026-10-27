@@ -21,7 +21,27 @@
         ]
       },
       {
+        "source": "/beta/latest.json",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json; charset=utf-8" },
+          { "key": "Cache-Control", "value": "no-store" }
+        ]
+      },
+      {
         "source": "/downloads/Alatheel-latest.apk",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/vnd.android.package-archive"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/downloads/beta/Alatheel-latest.apk",
         "headers": [
           {
             "key": "Content-Type",

@@ -2,6 +2,11 @@
 // Nothing is persisted: a fresh process must verify the published release again.
 export const UPDATE_RESUME_TTL_MS = 5 * 60 * 1000;
 export type UpdateCheckReason = "startup" | "resume" | "manual";
+export type UpdateChannel = "stable" | "beta";
+
+export function normalizeUpdateChannel(value: string | null): UpdateChannel {
+  return value === "beta" ? "beta" : "stable";
+}
 
 export function shouldCheckUpdate(
   reason: UpdateCheckReason,

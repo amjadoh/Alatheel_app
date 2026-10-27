@@ -305,6 +305,27 @@
 .update-card .button {
   width: 100%;
 }
+.update-channel {
+  display: flex;
+  gap: 6px;
+  margin: 16px 0;
+  padding: 4px;
+  border-radius: 13px;
+  background: #eae5d9;
+}
+.update-channel button {
+  flex: 1;
+  min-height: 41px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+.update-channel .selected {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 800;
+}
 * {
   box-sizing: border-box;
 }
