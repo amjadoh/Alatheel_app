@@ -8,7 +8,6 @@ import {
 } from "../functions/src/domain";
 import {
   horseAccount,
-  planPayment,
   accountRevision,
 } from "../functions/src/accounts";
 import { horseFinance } from "../functions/src/finance";

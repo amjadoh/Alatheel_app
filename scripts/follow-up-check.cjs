@@ -1,13 +1,10 @@
 // Real app UI with command-generated, isolated accounting fixtures only.
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path");
-const {spawn}=require("node:child_process"),{createRequire}=require("node:module");
-const requireQA=process.env.QA_NODE_MODULES?createRequire(path.join(process.env.QA_NODE_MODULES,"_qa.cjs")):require;
-const {chromium}=requireQA("playwright");
+const {launchBrowser,startVite}=require("./ui-harness.cjs");
 const base=process.env.QA_BASE_URL||`http://127.0.0.1:${process.env.QA_FOLLOWUP_PORT||5394}`;
 const output=path.resolve(process.env.QA_OUTPUT||"qa-results");
 const report={scope:"Isolated command-generated accounts; no production writes",checks:[],errors:[]};
 const clean=s=>String(s).replace(/[\u2066-\u2069]/g,"");
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
 let browser,server;
 fs.mkdirSync(output,{recursive:true});
 async function check(name,fn){await fn();report.checks.push(name);console.log("PASS",name);}
@@ -17,13 +14,8 @@ async function fits(page,locator,width){
   assert.equal(boxes.direction,"rtl");assert.ok(boxes.left>=0&&boxes.right<=width+1&&boxes.sw<=boxes.cw+1&&boxes.documentWidth<=boxes.viewport+1,JSON.stringify(boxes));
 }
 (async()=>{
-  if(!process.env.QA_BASE_URL){
-    server=spawn(process.execPath,["node_modules/vite/bin/vite.js","--config","vite.qa.config.ts","--port",new URL(base).port,"--strictPort"],{stdio:"ignore"});
-    let ready=false;
-    for(let i=0;i<120;i++){try{if((await fetch(base+"/tests/ui/app.html")).ok){ready=true;break;}}catch{}await wait(200);}
-    assert.ok(ready,"Follow-up fixture server did not start");
-  }
-  browser=await chromium.launch({headless:true,...(process.env.QA_CHROME?{executablePath:process.env.QA_CHROME}:{})});
+  server=await startVite(base,"/tests/ui/app.html",{error:"Follow-up fixture server did not start"});
+  browser=await launchBrowser();
   for(const width of [320,390,430]){
     const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
     await context.route("**/*",route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());

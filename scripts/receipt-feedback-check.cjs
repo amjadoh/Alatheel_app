@@ -1,8 +1,6 @@
 // Actual React screens; isolated fixtures. No GitHub, mail, production data or invites.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {spawn}=require('node:child_process'),{createRequire}=require('node:module');
-const qa=process.env.QA_NODE_MODULES?createRequire(path.join(process.env.QA_NODE_MODULES,'_qa.cjs')):require;
-const {chromium}=qa('playwright');
+const {launchBrowser,startVite}=require('./ui-harness.cjs');
 const output=path.resolve(process.env.QA_OUTPUT||'qa-results'),base=process.env.QA_BASE_URL||'http://127.0.0.1:5397';
 let browser,server;const report={checks:[],errors:[]};fs.mkdirSync(output,{recursive:true});
 async function check(name,fn){await fn();report.checks.push(name);console.log('PASS',name);}
@@ -17,11 +15,8 @@ async function pageFor(width,url){
 }
 (async()=>{
  try{
-  if(!process.env.QA_BASE_URL){
-   server=spawn(process.execPath,['node_modules/vite/bin/vite.js','--config','vite.qa.config.ts','--port','5397','--strictPort'],{stdio:'ignore'});
-   let ready=false;for(let i=0;i<100;i++){try{if((await fetch(base+'/tests/ui/app.html')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,200));}assert.ok(ready,'QA server unavailable');
-  }
-  browser=await chromium.launch({headless:true,...(process.env.QA_CHROME?{executablePath:process.env.QA_CHROME}:{})});
+  server=await startVite(base,'/tests/ui/app.html',{attempts:100,error:'QA server unavailable'});
+  browser=await launchBrowser();
   for(const width of [320,390,430]){
    const page=await pageFor(width,'/tests/ui/app.html?scenario=feedback');
    const launch=page.locator('.feedback-launcher');await launch.waitFor();
