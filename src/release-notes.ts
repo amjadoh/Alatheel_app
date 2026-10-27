@@ -1,4 +1,4 @@
-export const RELEASE_VERSION = "1.12.0";
+export const RELEASE_VERSION = "1.12.1";
 export const RELEASE_NOTES = [
   {
     "title": "👤 الحساب والبلاغات",
