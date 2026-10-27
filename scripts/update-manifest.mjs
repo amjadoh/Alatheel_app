@@ -11,21 +11,20 @@ export function updateManifest(
   channel = "stable",
 ) {
   if (
+    !["stable", "beta"].includes(channel) ||
     !/^\d+\.\d+\.\d+$/.test(versionName) ||
     !Number.isSafeInteger(versionCode) ||
     versionCode < 1 ||
     !bytes.length ||
-    bytes.length > 100 * 1024 * 1024 ||
-    !["stable", "beta"].includes(channel)
+    bytes.length > 100 * 1024 * 1024
   )
     throw new Error("Invalid release");
-  const directory = channel === "beta" ? "beta/" : "";
   return {
-    packageId: "com.alatheel.stable",
     channel,
+    packageId: "com.alatheel.stable",
     versionName,
     versionCode,
-    url: `https://alatheel-app-426403695200.web.app/downloads/${directory}Alatheel-${versionName}.apk`,
+    url: `https://alatheel-app-426403695200.web.app/downloads/${channel === "beta" ? "beta/" : ""}Alatheel-${versionName}.apk`,
     size: bytes.length,
     sha256: createHash("sha256").update(bytes).digest("hex"),
     notes,
@@ -57,15 +56,15 @@ if (
   ).trim();
   const manifest = updateManifest(bytes, version, code, notes, channel);
   const hosting = resolve(root, "downloads-hosting");
-  const directory = channel === "beta" ? "beta" : "";
-  const downloads = resolve(hosting, "downloads", directory);
-  const manifestDirectory = resolve(hosting, directory);
+  const lane = channel === "beta" ? "beta" : "";
+  const downloads = resolve(hosting, "downloads", lane);
+  const metadata = resolve(hosting, lane);
   await mkdir(downloads, { recursive: true });
-  await mkdir(manifestDirectory, { recursive: true });
+  await mkdir(metadata, { recursive: true });
   await copyFile(apk, resolve(downloads, `Alatheel-${version}.apk`));
   await copyFile(apk, resolve(downloads, "Alatheel-latest.apk"));
   await writeFile(
-    resolve(manifestDirectory, "latest.json"),
+    resolve(metadata, "latest.json"),
     JSON.stringify(manifest, null, 2) + "\n",
   );
   console.log(JSON.stringify(manifest));

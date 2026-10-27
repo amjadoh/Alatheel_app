@@ -60,6 +60,7 @@ import { horseAccount } from "../functions/src/accounts";
 import { receiptCash } from "../functions/src/receipt-cash";
 import { financialSummary } from "../functions/src/finance";
 import { emptyState } from "../functions/src/domain";
+import { PRIMARY_ADMIN_EMAIL } from "../functions/src/access";
 import {
   costs,
   horseCost,
@@ -290,6 +291,7 @@ export default function App() {
   const stockRunway = useMemo(() => a?.dataReady && staff(a) ? inventoryRunway(s, inventoryDay) : undefined, [s, inventoryDay, a?.dataReady, a?.role]);
   const isStaff = !!a && staff(a),
     isAdmin = a?.role === "admin",
+    isPrimaryAdmin = !!a?.dataReady && s.users.some(user => user.id === a.uid && String(user.email).toLowerCase() === PRIMARY_ADMIN_EMAIL),
     name = s.settings[0]?.stableName || "إسطبل الأثيل",
     active = s.horses.filter((h) => h.status !== "archived"),
     stats = costs(s, month),
@@ -1079,6 +1081,9 @@ export default function App() {
     setAccountHorseId(h.id);
   };
   const appUpdates=useAppUpdate();
+  useEffect(() => {
+    appUpdates.setPrimaryAccess(isPrimaryAdmin);
+  }, [isPrimaryAdmin]);
   const detailHorse = detail?.horseId ? s.horses.find(h => h.id === detail.horseId) : undefined;
   const opening = appUpdates.blocked || appUpdates.checking || (!a && authPhase !== "signed-out") || a?.dataReady === false;
   const recordedReady = useRef(false);

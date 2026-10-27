@@ -36,10 +36,10 @@ public class AppUpdaterPlugin extends Plugin {
     private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean downloading = new AtomicBoolean(false);
     private volatile JSONObject release;
-    private volatile String releaseChannel;
+    private volatile String releaseChannel = "stable";
 
-    private File apk() { return new File(getContext().getCacheDir(), "alatheel-update.apk"); }
-    private File metadata() { return new File(getContext().getCacheDir(), "alatheel-update.json"); }
+    private File apk(String channel) { return new File(getContext().getCacheDir(), "alatheel-update-" + channel + ".apk"); }
+    private File metadata(String channel) { return new File(getContext().getCacheDir(), "alatheel-update-" + channel + ".json"); }
     private HttpURLConnection open(String address) throws Exception {
         return open(address, 15000, 30000, null);
     }
@@ -63,13 +63,12 @@ public class AppUpdaterPlugin extends Plugin {
     private long installed() throws Exception {
         return code(getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0));
     }
-    private JSONObject valid(JSONObject m, String expectedChannel) throws Exception {
+    private JSONObject valid(JSONObject m, String channel) throws Exception {
         int version = m.getInt("versionCode");
         String name = m.getString("versionName");
-        String channel = m.optString("channel", "stable");
-        if (!channel.equals(expectedChannel)) throw new IOException("Wrong update channel");
-        if (!UpdatePolicy.valid(version, name, m.getString("packageId"), m.getString("url"),
-                m.getString("sha256"), m.getLong("size"), channel)) throw new IOException("Invalid update metadata");
+        if (!UpdatePolicy.valid(channel, m.optString("channel", "stable"), version, name,
+                m.getString("packageId"), m.getString("url"),
+                m.getString("sha256"), m.getLong("size"))) throw new IOException("Invalid update metadata");
         return m;
     }
     private String hex(byte[] bytes) {
@@ -97,14 +96,18 @@ public class AppUpdaterPlugin extends Plugin {
                 || !hex(MessageDigest.getInstance("SHA-256").digest(signers[0].toByteArray())).equals(CERT))
             throw new IOException("Wrong update signer");
     }
-    private boolean ready(JSONObject m) {
-        try { verify(apk(), m); return true; } catch (Exception ignored) { return false; }
+    private boolean ready(JSONObject m, String channel) {
+        try { verify(apk(channel), m); return true; } catch (Exception ignored) { return false; }
     }
 
     @PluginMethod
     public void check(PluginCall call) {
-        android.util.Log.i("AlatheelUpdater", "Metadata check requested");
-        String channel = UpdatePolicy.channel(call.getString("channel"));
+        String channel = call.getString("channel", "stable");
+        if (!UpdatePolicy.channel(channel)) {
+            call.reject("قناة التحديث غير صالحة.");
+            return;
+        }
+        android.util.Log.i("AlatheelUpdater", "Metadata check requested for " + channel);
         // The small metadata request must not borrow APK download timeouts.
         // A total deadline also bounds DNS/TLS stalls and slowly trickled bytes.
         AtomicBoolean settled = new AtomicBoolean(false);
@@ -136,7 +139,7 @@ public class AppUpdaterPlugin extends Plugin {
                 result.put("available", next.getInt("versionCode") > installed());
                 result.put("versionName", next.getString("versionName"));
                 result.put("notes", next.optString("notes", "تحسينات وإصلاحات للتطبيق"));
-                result.put("ready", next.getInt("versionCode") > installed() && ready(next));
+                result.put("ready", next.getInt("versionCode") > installed() && ready(next, channel));
                 if (settled.compareAndSet(false, true)) {
                     release = next;
                     releaseChannel = channel;
@@ -166,12 +169,13 @@ public class AppUpdaterPlugin extends Plugin {
     public void download(PluginCall call) {
         if (!downloading.compareAndSet(false, true)) { call.reject("التنزيل قيد التنفيذ"); return; }
         final JSONObject target = release;
+        final String targetChannel = releaseChannel;
         worker.execute(() -> {
             HttpURLConnection c = null;
             File partial = new File(getContext().getCacheDir(), "alatheel-update.part");
             try {
                 if (target == null || target.getInt("versionCode") <= installed()) throw new IOException("Check first");
-                if (!ready(target)) {
+                if (!ready(target, targetChannel)) {
                     c = open(target.getString("url"));
                     long size = target.getLong("size"), count = 0; int last = -1;
                     try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(partial)) {
@@ -188,9 +192,9 @@ public class AppUpdaterPlugin extends Plugin {
                         }
                     }
                     verify(partial, target);
-                    if (apk().exists() && !apk().delete()) throw new IOException("Cache busy");
-                    if (!partial.renameTo(apk())) throw new IOException("Cache unavailable");
-                    try (OutputStream out = new FileOutputStream(metadata())) {
+                    if (apk(targetChannel).exists() && !apk(targetChannel).delete()) throw new IOException("Cache busy");
+                    if (!partial.renameTo(apk(targetChannel))) throw new IOException("Cache unavailable");
+                    try (OutputStream out = new FileOutputStream(metadata(targetChannel))) {
                         out.write(target.toString().getBytes(StandardCharsets.UTF_8));
                     }
                 }
@@ -205,17 +209,17 @@ public class AppUpdaterPlugin extends Plugin {
         worker.execute(() -> {
             try {
                 JSONObject target = release;
-                if (target == null && metadata().length() <= 16384) {
-                    try (InputStream in = new FileInputStream(metadata())) {
+                String targetChannel = releaseChannel;
+                if (target == null && metadata(targetChannel).length() <= 16384) {
+                    try (InputStream in = new FileInputStream(metadata(targetChannel))) {
                         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
                         byte[] b = new byte[4096]; int n;
                         while ((n = in.read(b)) != -1) bytes.write(b, 0, n);
-                        JSONObject cached = new JSONObject(bytes.toString("UTF-8"));
-                        target = valid(cached, cached.optString("channel", "stable"));
+                        target = valid(new JSONObject(bytes.toString("UTF-8")), targetChannel);
                     }
                 }
                 if (target == null) throw new IOException("Download first");
-                verify(apk(), target);
+                verify(apk(targetChannel), target);
                 getActivity().runOnUiThread(() -> {
                     try {
                         if (Build.VERSION.SDK_INT >= 26 && !getContext().getPackageManager().canRequestPackageInstalls()) {
@@ -224,7 +228,7 @@ public class AppUpdaterPlugin extends Plugin {
                             JSObject result = new JSObject(); result.put("permissionRequired", true); call.resolve(result);
                             return;
                         }
-                        Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", apk());
+                        Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", apk(targetChannel));
                         Intent intent = new Intent(Intent.ACTION_VIEW);
                         intent.setDataAndType(uri, "application/vnd.android.package-archive");
                         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
