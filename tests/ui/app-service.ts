@@ -53,6 +53,14 @@ s.users = [
     role: "admin",
   },
 ];
+if (new URLSearchParams(location.search).get("scenario") === "primary-notifications") {
+  s.users = [
+    { id: "qa", displayName: a.displayName, email: "amjadoh@gmail.com", role: "admin", disabled: false, membershipApproved: true },
+    { id: "employee", displayName: "موظف تجريبي", email: "employee@example.test", role: "employee", disabled: false, membershipApproved: true },
+    { id: "owner-user", displayName: "مالك تجريبي", email: "owner@example.test", role: "owner", disabled: false, membershipApproved: true },
+    { id: "disabled", displayName: "عضو معطل", email: "disabled@example.test", role: "viewer", disabled: true, membershipApproved: true },
+  ];
+}
 s.owners = [{ id: "owner", displayName: "مالك تجريبي" }];
 s.mealTypes = [
   {

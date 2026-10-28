@@ -81,9 +81,7 @@ async function main() {
             layout.closeBottom <= 844 &&
             layout.closeSize >= 44,
         );
-        assert.deepEqual(layout.headings, [
-          "👤 الحساب والبلاغات", "📊 الرئيسية", "🐎 الخيل", "📦 المخزون", "💳 التحصيل", "🧾 المصروفات",
-        ]);
+        assert.deepEqual(layout.headings, ["تحسينات عامة"]);
         await page.screenshot({
           path: path.join(output, `release-${width}-top.png`),
         });
@@ -529,6 +527,26 @@ async function main() {
     await panel.getByLabel("إصدار جديد للتطبيق",{exact:true}).waitFor();
     assert.doesNotMatch(await panel.textContent(),/استحقاق التحصيل|انخفاض المخزون|نفاد المخزون/);
     await page.screenshot({path:path.join(output,"owner-update-alerts.png")});await context.close();
+  });
+  await check("Only the primary manager sees the manual notification composer and can preview selected recipients",async()=>{
+    const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    await context.route("**/*",route=>new URL(route.request().url()).origin===base?route.continue():route.abort());
+    const page=await context.newPage();page.on("pageerror",e=>report.errors.push(e.message));
+    await page.goto(base+"/tests/ui/app.html?scenario=primary-notifications");
+    await page.getByRole("dialog").getByRole("button",{name:"إغلاق",exact:true}).click();
+    await page.getByRole("button",{name:"التنبيهات",exact:true}).click();
+    const composer=page.locator(".management-message-composer");await composer.waitFor();
+    await composer.getByRole("button",{name:/اختر شخصًا أو أكثر/}).click();
+    await composer.getByRole("checkbox",{name:/مالك تجريبي/}).check();
+    await composer.getByLabel("نص الرسالة",{exact:true}).fill("نرجو تحديث بيانات الخيل قبل نهاية اليوم.");
+    await composer.getByRole("button",{name:"معاينة",exact:true}).click();
+    const preview=page.getByRole("dialog",{name:"معاينة الإشعار",exact:true});await preview.waitFor();
+    assert.match(await preview.textContent(),/مالك تجريبي/);
+    assert.match(await preview.textContent(),/نرجو تحديث بيانات الخيل/);
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    await page.screenshot({path:path.join(output,"primary-management-message.png")});
+    await preview.getByRole("button",{name:"إغلاق",exact:true}).click();
+    await context.close();
   });
   await check("Restoring a saved session never offers Google sign-in",async()=>{
     const context=await browser.newContext({viewport:{width:320,height:844},isMobile:true});const page=await context.newPage();

@@ -1085,6 +1085,7 @@ export default function App() {
   }, [opening, a?.uid]);
   const notifications = useStaffNotifications(a, target => {
     setDetail(null);setAccountMenuOpen(false);
+    if(target.page === "notifications"){go("notifications");return;}
     if(target.page === "feedback"){setFeedbackOpen(true);return;}
     if(target.page === "update"){
       const channel=target.channel === "beta" ? "beta" : "stable";
@@ -1777,7 +1778,7 @@ export default function App() {
                 )}
               </>
             )}
-            {tab === "notifications" && <NotificationsPanel notifications={notifications}/>}
+            {tab === "notifications" && <NotificationsPanel notifications={notifications} primaryAdmin={isPrimaryAdmin} users={s.users}/>}
             {tab === "inventory" && isStaff && (
               <>
                 {heading(

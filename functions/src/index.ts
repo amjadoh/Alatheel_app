@@ -38,6 +38,7 @@ export const feedbackBridge = feedbackExports.feedbackBridge;
 const auth = getAuth();
 const notificationExports = notificationFunctions(db, databaseId, optionsForNotifications(), verifiedGoogle);
 export const updatePushDevice = notificationExports.updatePushDevice;
+export const sendManagementMessage = notificationExports.sendManagementMessage;
 export const synchronizeFeeding = notificationExports.synchronizeFeeding;
 export const remindCollections = notificationExports.remindCollections;
 export const inventoryAlert = notificationExports.inventoryAlert;

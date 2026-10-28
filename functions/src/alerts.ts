@@ -1,13 +1,13 @@
 import type { Row, State } from "./domain";
 import { horseAccount } from "./accounts";
 export type AlertKind =
-  "collection_due" | "stock_low" | "stock_empty" | "app_update" | "app_feedback";
+  "collection_due" | "stock_low" | "stock_empty" | "app_update" | "app_feedback" | "management_message";
 export type StaffAlert = {
   key: string;
   kind: AlertKind;
   title: string;
   body: string;
-  page: "income" | "inventory" | "update" | "feedback";
+  page: "income" | "inventory" | "update" | "feedback" | "notifications";
   horseId?: string;
   mealTypeId?: string;
   amount?: number;
@@ -54,12 +54,14 @@ export const eligibleAlertRecipient = (alert: StaffAlert, u: Row) =>
     ? alert.channel === "beta"
       ? eligiblePrimaryAdmin(u)
       : eligiblePushUser(u)
+    : alert.kind === "management_message"
+      ? eligiblePushUser(u)
     : eligibleStaff(u);
 export const allowedAlertKinds = (u: Row): AlertKind[] =>
   eligibleStaff(u)
-    ? ["collection_due", "stock_low", "stock_empty", "app_update", ...(String(u.email).toLowerCase()==="amjadoh@gmail.com"?["app_feedback" as const]:[])]
+    ? ["collection_due", "stock_low", "stock_empty", "app_update", "management_message", ...(String(u.email).toLowerCase()==="amjadoh@gmail.com"?["app_feedback" as const]:[])]
     : eligiblePushUser(u)
-      ? ["app_update"]
+      ? ["app_update", "management_message"]
       : [];
 export function appUpdateAlert(manifest: any): StaffAlert {
   const version = String(manifest?.versionName || "");
@@ -83,7 +85,7 @@ export function appUpdateAlert(manifest: any): StaffAlert {
     key: channel === "beta" ? `release_beta_${manifest.versionCode}` : `release_${manifest.versionCode}`,
     kind: "app_update",
     title: channel === "beta" ? "تحديث بيتا جديد للأثيل" : "تحديث جديد للأثيل",
-    body: `الإصدار${channel === "beta" ? " التجريبي" : ""} \u2066${version}\u2069 متاح الآن. اضغط لتحديث التطبيق.`,
+    body: "تم معالجة وتحسين بعض الإجراءات",
     page: "update",
     versionCode: manifest.versionCode,
     channel,
@@ -110,7 +112,7 @@ export function deviceWantsAlert(
   return (
     device.enabled === true &&
     Number(device.sessionExpiresAt) > now &&
-    (alert.kind === "app_feedback" || !device.kinds || device.kinds.includes(alert.kind)) &&
+    (["app_feedback", "management_message"].includes(alert.kind) || !device.kinds || device.kinds.includes(alert.kind)) &&
     (alert.kind !== "app_update" ||
       Number(device.installedVersionCode || 0) < Number(alert.versionCode))
   );
@@ -166,7 +168,7 @@ export function pushCopy(kind: AlertKind, channel?: "stable" | "beta") {
   if (kind === "app_update")
     return {
       title: channel === "beta" ? "تحديث بيتا جديد للأثيل" : "تحديث جديد للأثيل",
-      body: channel === "beta" ? "تتوفر نسخة بيتا جديدة للتجربة. افتح الأثيل للتحديث." : "يتوفر إصدار جديد. افتح التطبيق للتحديث.",
+      body: "تم معالجة وتحسين بعض الإجراءات",
     };
   return kind === "collection_due"
     ? {
