@@ -36,6 +36,7 @@ export type StaffAlert = {
   page: "income" | "inventory" | "update" | "feedback";
   horseId?: string;
   mealTypeId?: string;
+  channel?: "stable" | "beta";
 };
 const allKinds = ["collection_due", "stock_low", "stock_empty", "app_update"];
 export function useStaffNotifications(
@@ -44,6 +45,7 @@ export function useStaffNotifications(
     page: "income" | "inventory" | "update" | "feedback";
     horseId?: string;
     mealTypeId?: string;
+     channel?: "stable" | "beta";
   }) => void,
 ) {
   const [alerts, setAlerts] = useState<StaffAlert[]>([]),
@@ -84,6 +86,7 @@ export function useStaffNotifications(
         page: alert.page,
         horseId: alert.horseId,
         mealTypeId: alert.mealTypeId,
+         channel: alert.channel,
       });
   }
   const openRef = useRef(open);

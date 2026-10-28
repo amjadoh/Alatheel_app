@@ -1,6 +1,6 @@
 // Local-only UI fixture; Vite production build only includes the root index.html.
 import { createRoot } from "react-dom/client";
-import { UpdateGate, UpdaterPlugin } from "../../src/updates";
+import { UpdateButton, UpdateGate, UpdaterPlugin } from "../../src/updates";
 import "@fontsource/noto-sans-arabic/400.css";
 import "@fontsource/noto-sans-arabic/800.css";
 import "../../src/style.css";
@@ -40,6 +40,7 @@ createRoot(document.getElementById("root")!).render(
   <UpdateGate android client={client}>
     <main>
       <h1>واجهة التطبيق للاختبار</h1>
+      <UpdateButton />
       <button>عملية محمية</button>
     </main>
   </UpdateGate>,

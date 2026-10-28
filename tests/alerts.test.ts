@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyState } from "../functions/src/domain";
-import { collectionDueAlerts, stockAlert, eligibleStaff, eligiblePushUser, allowedAlertKinds, appUpdateAlert, deliveryDecision, deviceWantsAlert, riyadhClock, pushCopy } from "../functions/src/alerts";
+import { collectionDueAlerts, stockAlert, eligibleStaff, eligiblePushUser, eligibleAlertRecipient, allowedAlertKinds, appUpdateAlert, deliveryDecision, deviceWantsAlert, riyadhClock, pushCopy } from "../functions/src/alerts";
 import { assertSession, sessionExpiresAt } from "../functions/src/session-policy";
 test("collection reminders use Saudi21:00 and only the unpaid amount due today", () => {
   const s=emptyState();s.horses=[{id:"h",name:"خيل",status:"boarding",entryDate:"2026-10-01",dueDate:"2026-10-18",boardingFee:700}];
@@ -43,6 +43,15 @@ const release={packageId:"com.alatheel.stable",versionName:"1.8.1",versionCode:1
 test("release announcements have a stable per-version identity and reject untrusted or incomplete manifests",()=>{
  const a=appUpdateAlert(release);assert.equal(a.key,"release_10");assert.equal(a.page,"update");assert.deepEqual(appUpdateAlert({...release}),a);
  for(const value of [{...release,url:"https://evil.test/app.apk"},{...release,sha256:"bad"},{...release,size:0},{...release,versionCode:9},{...release,packageId:"other"}])assert.throws(()=>appUpdateAlert(value));
+});
+test("beta release announcement is isolated to the primary stable manager",()=>{
+ const beta=appUpdateAlert({...release,channel:"beta",url:"https://alatheel-app-426403695200.web.app/downloads/beta/Alatheel-1.8.1.apk"});
+ assert.equal(beta.key,"release_beta_10");assert.equal(beta.channel,"beta");assert.match(beta.title,/بيتا/);
+ const primary={id:"primary",email:"amjadoh@gmail.com",role:"admin",disabled:false,membershipApproved:true};
+ assert.equal(eligibleAlertRecipient(beta,primary),true);
+ for(const user of [{...primary,id:"manager",email:"manager@example.test"},{...primary,id:"employee",role:"employee"},{...primary,id:"owner",role:"owner"}]) assert.equal(eligibleAlertRecipient(beta,user),false);
+ assert.throws(()=>appUpdateAlert({...release,channel:"beta"}));
+ assert.match(pushCopy("app_update","beta").title,/بيتا/);
 });
 test("all approved members may receive updates while only staff may receive financial or stock alerts",()=>{
  for(const role of ["admin","employee","owner","viewer"]){const u={id:role,role,disabled:false,membershipApproved:true};assert.ok(eligiblePushUser(u));assert.ok(allowedAlertKinds(u).includes("app_update"));assert.equal(allowedAlertKinds(u).includes("collection_due"),["admin","employee"].includes(role));}

@@ -12,6 +12,7 @@ export type StaffAlert = {
   mealTypeId?: string;
   amount?: number;
   versionCode?: number;
+  channel?: "stable" | "beta";
 };
 export type StockAlertState = {
   phase: "healthy" | "low" | "empty";
@@ -44,6 +45,16 @@ export const eligiblePushUser = (u: Row) =>
   ["admin", "employee", "owner", "viewer"].includes(u.role) &&
   u.disabled === false &&
   u.membershipApproved === true;
+export const eligiblePrimaryAdmin = (u: Row) =>
+  eligiblePushUser(u) &&
+  u.role === "admin" &&
+  String(u.email || "").toLowerCase() === "amjadoh@gmail.com";
+export const eligibleAlertRecipient = (alert: StaffAlert, u: Row) =>
+  alert.kind === "app_update"
+    ? alert.channel === "beta"
+      ? eligiblePrimaryAdmin(u)
+      : eligiblePushUser(u)
+    : eligibleStaff(u);
 export const allowedAlertKinds = (u: Row): AlertKind[] =>
   eligibleStaff(u)
     ? ["collection_due", "stock_low", "stock_empty", "app_update", ...(String(u.email).toLowerCase()==="amjadoh@gmail.com"?["app_feedback" as const]:[])]
@@ -52,13 +63,16 @@ export const allowedAlertKinds = (u: Row): AlertKind[] =>
       : [];
 export function appUpdateAlert(manifest: any): StaffAlert {
   const version = String(manifest?.versionName || "");
+  const channel = manifest?.channel === "beta" ? "beta" : "stable";
+  const lane = channel === "beta" ? "beta/" : "";
   if (
     !/^\d+\.\d+\.\d+$/.test(version) ||
     !Number.isSafeInteger(manifest?.versionCode) ||
     manifest.versionCode < 10 ||
     manifest.packageId !== "com.alatheel.stable" ||
     manifest.url !==
-      `https://alatheel-app-426403695200.web.app/downloads/Alatheel-${version}.apk` ||
+      `https://alatheel-app-426403695200.web.app/downloads/${lane}Alatheel-${version}.apk` ||
+    ![undefined, "stable", "beta"].includes(manifest.channel) ||
     !/^[a-f0-9]{64}$/.test(manifest.sha256 || "") ||
     !Number.isSafeInteger(manifest.size) ||
     manifest.size <= 0 ||
@@ -66,12 +80,13 @@ export function appUpdateAlert(manifest: any): StaffAlert {
   )
     throw new Error("بيانات إصدار التطبيق غير صالحة للإعلان");
   return {
-    key: `release_${manifest.versionCode}`,
+    key: channel === "beta" ? `release_beta_${manifest.versionCode}` : `release_${manifest.versionCode}`,
     kind: "app_update",
-    title: "تحديث جديد للأثيل",
-    body: `الإصدار \u2066${version}\u2069 متاح الآن. اضغط لتحديث التطبيق.`,
+    title: channel === "beta" ? "تحديث بيتا جديد للأثيل" : "تحديث جديد للأثيل",
+    body: `الإصدار${channel === "beta" ? " التجريبي" : ""} \u2066${version}\u2069 متاح الآن. اضغط لتحديث التطبيق.`,
     page: "update",
     versionCode: manifest.versionCode,
+    channel,
   };
 }
 /** At most three attempts within 24 hours; no seven-day platform retry policy. */
@@ -146,12 +161,12 @@ export function stockAlert(
   };
 }
 /** Push banners omit financial details; the authenticated inbox provides the complete alert. */
-export function pushCopy(kind: AlertKind) {
+export function pushCopy(kind: AlertKind, channel?: "stable" | "beta") {
   if(kind==="app_feedback")return {title:"بلاغ جديد على تطبيق الأثيل",body:"وصل بلاغ جديد. افتح التطبيق لمراجعته."};
   if (kind === "app_update")
     return {
-      title: "تحديث جديد للأثيل",
-      body: "يتوفر إصدار جديد. افتح التطبيق للتحديث.",
+      title: channel === "beta" ? "تحديث بيتا جديد للأثيل" : "تحديث جديد للأثيل",
+      body: channel === "beta" ? "تتوفر نسخة بيتا جديدة للتجربة. افتح الأثيل للتحديث." : "يتوفر إصدار جديد. افتح التطبيق للتحديث.",
     };
   return kind === "collection_due"
     ? {
