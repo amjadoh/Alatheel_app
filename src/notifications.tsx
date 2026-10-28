@@ -376,8 +376,8 @@ function ManagementMessageComposer({ users }: { users: Row[] }) {
       </div>
       {notice && <p className="notice success" role="status">{notice}</p>}
       {error && <p className="notice error" role="alert">{error}</p>}
-      <dialog ref={dialog} onCancel={(e) => {e.preventDefault();setPreviewOpen(false);}}>
-        <div className="modal-heading"><h2>معاينة الإشعار</h2><button className="icon-button" type="button" aria-label="إغلاق" onClick={() => setPreviewOpen(false)}><X/></button></div>
+      <dialog aria-labelledby="management-message-preview-title" ref={dialog} onCancel={(e) => {e.preventDefault();setPreviewOpen(false);}}>
+        <div className="modal-heading"><h2 id="management-message-preview-title">معاينة الإشعار</h2><button className="icon-button" type="button" aria-label="إغلاق" onClick={() => setPreviewOpen(false)}><X/></button></div>
         <div className="modal-body">
           <div className="management-message-preview"><Bell size={20}/><span><b>رسالة من إدارة الإسطبل</b><span>{body.trim()}</span></span></div>
           <p className="muted">سيُرسل إلى {displayNumber(selected.length)}: {recipients.filter((u) => selected.includes(u.id)).map((u) => u.displayName || u.email).join("، ")}</p>

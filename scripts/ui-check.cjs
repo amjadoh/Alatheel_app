@@ -537,7 +537,7 @@ async function main() {
     await page.getByRole("button",{name:"التنبيهات",exact:true}).click();
     const composer=page.locator(".management-message-composer");await composer.waitFor();
     await composer.getByRole("button",{name:/اختر شخصًا أو أكثر/}).click();
-    await composer.getByText("مالك تجريبي",{exact:true}).click();
+    await composer.getByRole("checkbox",{name:/مالك تجريبي/}).check();
     await composer.getByLabel("نص الرسالة",{exact:true}).fill("نرجو تحديث بيانات الخيل قبل نهاية اليوم.");
     await composer.getByRole("button",{name:"معاينة",exact:true}).click();
     const preview=page.getByRole("dialog",{name:"معاينة الإشعار",exact:true});await preview.waitFor();
