@@ -13,6 +13,7 @@ async function open(parameters = {}, width = 390) {
   const context = await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1});
   await context.route("**/*", route => new URL(route.request().url()).origin === new URL(base).origin ? route.continue() : route.abort());
   const page = await context.newPage();
+  if(parameters.savedBeta === "1") await page.addInitScript(()=>localStorage.setItem("alatheel.update-channel","beta"));
   page.on("pageerror", e=>report.errors.push(e.message));
   await page.goto(base+"/tests/ui/startup.html?"+new URLSearchParams({scenario:"startup",...parameters}),{waitUntil:"domcontentloaded",timeout:90000});
   await page.waitForFunction(()=>!!window.__startupQA);
@@ -47,7 +48,8 @@ async function noActions(page) {
       await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
       const result=await measurement(page,`normal-${width}`);
       assert.ok(result.timings.dashboardVisible>=result.timings.financialReady);
-      assert.equal(result.updateChecks,0,"Startup unexpectedly checked for an update");
+      assert.equal(result.updateChecks,1,"Startup did not check Official exactly once");
+      assert.ok(result.timings.dashboardVisible>=result.timings.updateFinished);
       assert.ok(result.timings.dashboardVisible-result.timings.financialReady<700,"Ready app waited for an unnecessary animation delay");
       assert.ok(result.timings.logoVisible<result.timings.authReady,"Logo was not shown during session restoration");
     });
@@ -57,8 +59,9 @@ async function noActions(page) {
     const {page,context}=await open({authDelay:"20",dataDelay:"50",readyDelay:"80",updateDelay:"40"});
     await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
     const result=await measurement(page,"fast-ready");
-    assert.equal(result.updateChecks,0,"Fast startup unexpectedly checked for an update");
-    assert.ok(result.timings.dashboardVisible-result.timings.financialReady<700,"Animation introduced a minimum startup wait");
+    assert.equal(result.updateChecks,1,"Fast startup did not check Official exactly once");
+    const last=Math.max(result.timings.financialReady,result.timings.updateFinished);
+    assert.ok(result.timings.dashboardVisible-last<700,"Animation introduced a minimum startup wait");
     await context.close();
   });
   await check("Horse deep links wait for complete financial data and open details stay current", async()=>{
@@ -84,50 +87,61 @@ async function noActions(page) {
     },revised.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}));
     await context.close();
   });
-  await check("A slow update endpoint is never consulted during startup",async()=>{
+  await check("A slower Official check prevents early dashboard access",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"900"});
+    await page.waitForFunction(()=>!!window.__startupQA.timings.financialReady);
+    await noActions(page);
     await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
     const result=await measurement(page,"slow-update");
-    assert.equal(result.updateChecks,0);
-    assert.equal(result.timings.updateStarted,undefined);
+    assert.equal(result.updateChecks,1);
+    assert.ok(result.timings.dashboardVisible>=result.timings.updateFinished);
     await context.close();
   });
-  await check("An available update becomes mandatory only after a manual check",async()=>{
+  await check("An available Official update is mandatory during startup",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"300",update:"required"});
-    await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
-    assert.equal(await page.evaluate(()=>window.__startupQA.updateChecks),0);
-    await page.evaluate(()=>window.__startupForceCheck());
     await page.getByRole("heading",{name:"حدّث التطبيق للمتابعة"}).waitFor();
     await noActions(page);
     const result=await measurement(page,"required-update");
-    assert.ok(result.timings.dashboardVisible<result.timings.updateStarted,"Manual update check ran before the dashboard opened");
+    assert.equal(result.timings.dashboardVisible,undefined);
     assert.equal(result.downloads,0);assert.equal(result.installs,0);
     await context.close();
   });
   await check("Non-primary accounts remain on Official and cannot bypass a mandatory update",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"80",update:"required",updateAfterFirst:"current"});
-    await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
-    await page.evaluate(()=>window.__startupForceCheck());
     await page.getByRole("heading",{name:"حدّث التطبيق للمتابعة"}).waitFor();
     assert.deepEqual(await page.evaluate(()=>window.__startupQA.updateChannels),["stable"]);
     assert.equal(await page.getByRole("button",{name:"Bata",exact:true}).count(),0);
     await noActions(page);
     await context.close();
   });
-  await check("A failed manual update check stays blocked with a retry action",async()=>{
-    const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"300",update:"failed"});
+  await check("A saved Bata preference cannot bypass a mandatory Official startup update",async()=>{
+    const {page,context}=await open({primary:"1",savedBeta:"1",authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"80",update:"required"});
+    await page.getByRole("heading",{name:"حدّث التطبيق للمتابعة"}).waitFor();
+    assert.deepEqual(await page.evaluate(()=>window.__startupQA.updateChannels),["stable"]);
+    await noActions(page);
+    await context.close();
+  });
+  await check("A primary manager checks Official automatically and saved Bata only on demand",async()=>{
+    const {page,context}=await open({primary:"1",savedBeta:"1",authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"80",update:"current",updateAfterFirst:"current"});
     await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
+    assert.deepEqual(await page.evaluate(()=>window.__startupQA.updateChannels),["stable"]);
     await page.evaluate(()=>window.__startupForceCheck());
+    await page.waitForFunction(()=>window.__startupQA.updateChecks===2);
+    assert.deepEqual(await page.evaluate(()=>window.__startupQA.updateChannels),["stable","beta"]);
+    await context.close();
+  });
+  await check("A failed initial Official check stays blocked with a retry action",async()=>{
+    const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"300",update:"failed"});
     await page.getByRole("heading",{name:"تعذر التحقق من الإصدار"}).waitFor();
     await noActions(page);
     const result=await measurement(page,"failed-update");
-    assert.ok(result.timings.dashboardVisible<result.timings.updateStarted,"Failed manual check ran before the dashboard opened");
+    assert.equal(result.timings.dashboardVisible,undefined);
     assert.ok(await page.getByRole("button",{name:/إعادة/}).count()>0);
     await context.close();
   });
   await check("Update notifications during an active check coalesce into one forced follow-up",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"350"});
-    await page.waitForFunction(()=>!!window.__startupForceCheck);
+    await page.waitForFunction(()=>window.__startupQA.updateChecks===1&&!!window.__startupForceCheck);
     await page.evaluate(()=>{for(let i=0;i<4;i++)window.__startupForceCheck();});
     await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>window.__startupQA.updateChecks),2);
@@ -137,16 +151,14 @@ async function noActions(page) {
   });
   await check("A queued forced check does not run after the update gate unmounts",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"350"});
-    await page.waitForFunction(()=>!!window.__startupForceCheck);
-    await page.evaluate(()=>{window.__startupForceCheck();window.__startupForceCheck();window.__startupUnmount();});
+    await page.waitForFunction(()=>window.__startupQA.updateChecks===1&&!!window.__startupForceCheck);
+    await page.evaluate(()=>{window.__startupForceCheck();window.__startupUnmount();});
     await page.waitForTimeout(450);
     assert.equal(await page.evaluate(()=>window.__startupQA.updateChecks),1);
     await context.close();
   });
   await check("Notifications during download and installation defer one check and cannot unlock a known update",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"100",update:"required",updateAfterFirst:"current",downloadDelay:"350",installDelay:"350"});
-    await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
-    await page.evaluate(()=>window.__startupForceCheck());
     await page.getByRole("button",{name:"تنزيل التحديث وتثبيته",exact:true}).waitFor();
     await page.getByRole("button",{name:"تنزيل التحديث وتثبيته",exact:true}).click();
     await page.waitForFunction(()=>window.__startupQA.downloads===1);
@@ -163,15 +175,12 @@ async function noActions(page) {
   });
   await check("Failure after a required update remains mandatory and keeps its release details",async()=>{
     const {page,context}=await open({authDelay:"40",dataDelay:"80",readyDelay:"120",updateDelay:"100",update:"required",updateAfterFirst:"failed"});
-    await page.getByRole("button",{name:"إضافة خيل",exact:true}).waitFor();
-    await page.evaluate(()=>window.__startupForceCheck());
     await page.getByRole("heading",{name:"حدّث التطبيق للمتابعة"}).waitFor();
     await page.evaluate(()=>window.__startupForceCheck());
     await page.getByRole("button",{name:"إعادة المحاولة",exact:true}).waitFor();
     assert.equal(await page.getByText("الإصدار 99.0.0",{exact:true}).count(),1);
     await noActions(page);
-    const result=await measurement(page,"known-update-after-failure");
-    assert.ok(result.timings.dashboardVisible<result.timings.updateStarted,"Required update was checked before the dashboard opened");
+    assert.equal((await measurement(page,"known-update-after-failure")).timings.dashboardVisible,undefined);
     await context.close();
   });
   for(const state of ["waiting","blocked"]) await check(`Authentication ${state} keeps data hidden and offers recovery without a Google flash`,async()=>{

@@ -1,4 +1,4 @@
-export const RELEASE_VERSION = "1.12.2";
+export const RELEASE_VERSION = "1.12.3";
 export const RELEASE_NOTES = [
   {
     title: "تحسينات عامة",
