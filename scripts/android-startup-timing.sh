@@ -46,7 +46,18 @@ for sample in 1 2 3 4 5; do
   test "$STOPPED" = true
   adb logcat -c
   STARTED=$(date +%s%3N)
-  adb shell am start -W -n com.alatheel.stable/.MainActivity > "android-qa/startup/cold-$sample-activity.txt"
+  ACTIVITY_LOG="android-qa/startup/cold-$sample-activity.txt"
+  : > "$ACTIVITY_LOG"
+  LAUNCHED=false
+  # API 35 can occasionally return LaunchState UNKNOWN and leave the launcher
+  # visible without creating the app process. Retry only that no-process case;
+  # a started process still has to pass the normal visible-screen/crash checks.
+  for launch_attempt in 1 2 3; do
+    adb shell am start -W -n com.alatheel.stable/.MainActivity >> "$ACTIVITY_LOG"
+    if adb shell pidof com.alatheel.stable >/dev/null 2>&1; then LAUNCHED=true; break; fi
+    sleep 0.5
+  done
+  test "$LAUNCHED" = true
   wait_ready "cold-$sample"
   FINISHED=$(date +%s%3N)
   printf '%s\n' "$((FINISHED-STARTED))" > "android-qa/startup/cold-$sample-upper-bound-ms.txt"
