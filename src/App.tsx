@@ -1086,7 +1086,11 @@ export default function App() {
   const notifications = useStaffNotifications(a, target => {
     setDetail(null);setAccountMenuOpen(false);
     if(target.page === "feedback"){setFeedbackOpen(true);return;}
-    if(target.page === "update"){appUpdates.check();go("more");return;}
+    if(target.page === "update"){
+      const channel=target.channel === "beta" ? "beta" : "stable";
+      if(appUpdates.channel === channel)appUpdates.check();else appUpdates.setChannel(channel);
+      go("more");return;
+    }
     if(target.page === "income" && target.horseId){const horse=s.horses.find(h=>h.id===target.horseId);if(horse){go("income");collect(horse);}}
     else {go("inventory");if(target.mealTypeId)setSearch(s.mealTypes.find(m=>m.id===target.mealTypeId)?.name || "");}
   });

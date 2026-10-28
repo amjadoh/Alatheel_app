@@ -21,6 +21,7 @@ import {
   stockAlert,
   eligibleStaff,
   eligiblePushUser,
+  eligibleAlertRecipient,
   allowedAlertKinds,
   appUpdateAlert,
   deliveryDecision,
@@ -80,9 +81,7 @@ export function notificationFunctions(
   ) {
     // Event IDs are deterministic, and the event marker is written atomically with all recipient alerts.
     for (const alert of alerts)
-      for (const u of users.filter(
-        alert.kind === "app_update" ? eligiblePushUser : eligibleStaff,
-      )) {
+      for (const u of users.filter((user) => eligibleAlertRecipient(alert, user))) {
         const id = digest(alert.key);
         tx.create(db.doc(`users/${u.id}/staffAlerts/${id}`), {
           ...alert,
@@ -266,35 +265,39 @@ export function notificationFunctions(
       retryCount: 0,
     },
     async () => {
-      const response = await fetch(
-        "https://alatheel-app-426403695200.web.app/latest.json",
-        { signal: AbortSignal.timeout(15000), cache: "no-store" },
-      );
-      ensure(response.ok, "تعذر قراءة الإصدار المنشور");
-      const text = await response.text();
-      ensure(text.length <= 12000, "بيانات الإصدار أكبر من الحد المسموح");
-      const manifest = JSON.parse(text);
-      if (Number(manifest.versionCode) < 10) return;
-      const alert = appUpdateAlert(manifest),
-        now = new Date().toISOString();
-      await db.runTransaction(async (tx) => {
-        const state = await readState(tx, ["users"]),
-          ref = db.doc("appUpdateState/current"),
-          old = await tx.get(ref);
-        if (Number(old.data()?.versionCode || 0) >= manifest.versionCode)
-          return;
-        ensure(
-          state.users.filter(eligiblePushUser).length < 449,
-          "حجم إعلان الإصدار يحتاج تقسيمًا",
+      for (const channel of ["stable", "beta"] as const) {
+        const response = await fetch(
+          `https://alatheel-app-426403695200.web.app/${channel === "beta" ? "beta/" : ""}latest.json`,
+          { signal: AbortSignal.timeout(15000), cache: "no-store" },
         );
-        tx.set(ref, {
-          versionCode: manifest.versionCode,
-          versionName: manifest.versionName,
-          sha256: manifest.sha256,
-          announcedAt: now,
+        if (channel === "beta" && response.status === 404) continue;
+        ensure(response.ok, "تعذر قراءة الإصدار المنشور");
+        const text = await response.text();
+        ensure(text.length <= 12000, "بيانات الإصدار أكبر من الحد المسموح");
+        const manifest = JSON.parse(text);
+        if (Number(manifest.versionCode) < 10) continue;
+        const alert = appUpdateAlert(manifest),
+          now = new Date().toISOString();
+        await db.runTransaction(async (tx) => {
+          const state = await readState(tx, ["users"]),
+            ref = db.doc(`appUpdateState/${channel === "beta" ? "beta" : "current"}`),
+            old = await tx.get(ref);
+          if (Number(old.data()?.versionCode || 0) >= manifest.versionCode)
+            return;
+          ensure(
+            state.users.filter((user) => eligibleAlertRecipient(alert, user)).length < 449,
+            "حجم إعلان الإصدار يحتاج تقسيمًا",
+          );
+          tx.set(ref, {
+            channel,
+            versionCode: manifest.versionCode,
+            versionName: manifest.versionName,
+            sha256: manifest.sha256,
+            announcedAt: now,
+          });
+          createAlerts(tx, [alert], state.users, now);
         });
-        createAlerts(tx, [alert], state.users, now);
-      });
+      }
     },
   );
   async function deliver(
@@ -320,6 +323,7 @@ export function notificationFunctions(
         return null;
       }
       if (
+        !eligibleAlertRecipient(a as StaffAlert, { ...p.data(), id: p.id } as any) ||
         !allowedAlertKinds({ ...p.data(), id: p.id } as any).includes(a.kind)
       ) {
         tx.update(ref, { deliveryState: "cancelled", leaseUntil: 0 });
@@ -336,7 +340,7 @@ export function notificationFunctions(
         const feedback=await tx.get(db.doc("appFeedback/"+a.feedbackId));
         relevant=feedback.exists&&feedback.data()?.syncState!=="draft"&&String(p.data()?.email).toLowerCase()==="amjadoh@gmail.com";
       } else if (a.kind === "app_update") {
-        const current = await tx.get(db.doc("appUpdateState/current"));
+        const current = await tx.get(db.doc(`appUpdateState/${a.channel === "beta" ? "beta" : "current"}`));
         relevant = current.data()?.versionCode === a.versionCode;
       } else {
         const current = await tx.get(db.doc(`mealTypes/${a.mealTypeId}`));
@@ -374,7 +378,7 @@ export function notificationFunctions(
           ...(plan.idleState!=="sent" ? {deliveredAt:null} : {})});
         return;
       }
-      const copy = pushCopy(alert.kind);
+      const copy = pushCopy(alert.kind, alert.channel);
       const result = await sendPush({
         tokens:selected.map(d=>d.data().token),data:{...copy,alertId,userId,kind:alert.kind},
         android:{priority:"high",ttl:alert.kind==="collection_due" ? 3*3600000 : 24*3600000,collapseKey:alertId},
