@@ -53,6 +53,7 @@ s.users = [
     role: "admin",
   },
 ];
+if(new URLSearchParams(location.search).get("primary")==="1")s.users[0].email="amjadoh@gmail.com";
 if (new URLSearchParams(location.search).get("scenario") === "primary-notifications") {
   s.users = [
     { id: "qa", displayName: a.displayName, email: "amjadoh@gmail.com", role: "admin", disabled: false, membershipApproved: true },

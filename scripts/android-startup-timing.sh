@@ -62,9 +62,9 @@ for sample in 1 2 3 4 5; do
   FINISHED=$(date +%s%3N)
   printf '%s\n' "$((FINISHED-STARTED))" > "android-qa/startup/cold-$sample-upper-bound-ms.txt"
   adb logcat -d > "android-qa/startup/cold-$sample.log"
-  if grep -Fq 'AlatheelUpdater: Metadata check requested' "android-qa/startup/cold-$sample.log"; then
-    cat "android-qa/startup/cold-$sample.log"; exit 1
-  fi
+  # Every fresh process must verify Official exactly once before admitting the
+  # user. A missing check regresses update discovery; duplicates delay startup.
+  test "$(grep -Fc 'AlatheelUpdater: Metadata check requested' "android-qa/startup/cold-$sample.log")" -eq 1
 done
 PROCESS_ID=$(adb shell pidof com.alatheel.stable | tr -d '\r')
 test -n "$PROCESS_ID"
@@ -92,9 +92,9 @@ for file in sorted(folder.glob('cold-*-activity.txt')):
     assert match,file
     activity.append(int(match[1]))
 assert len(upper)==len(activity)==5
-result={'scope':'Android35 emulator; signed APK; process launch to visibly actionable member sign-in entry, without account authentication',
+result={'scope':'Android35 emulator; signed APK; process launch through one Official update check to visibly actionable member sign-in entry, without account authentication',
         'visibleEntryUpperBoundMs':upper,'medianUpperBoundMs':statistics.median(upper),'activityTotalTimeMs':activity,
-        'coldStartsWithoutMetadataCheck':5,'warmResumesInSameProcessWithoutMetadataCheck':5,
+        'coldStartsWithOneOfficialMetadataCheck':5,'warmResumesInSameProcessWithoutRepeatedMetadataCheck':5,
         'limitations':'The upper bound includes adb and accessibility polling overhead. Activity time is separate. Neither measures a real account session or the user phone.'}
 (folder/'timing.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result))
