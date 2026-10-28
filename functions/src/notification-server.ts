@@ -275,6 +275,7 @@ export function notificationFunctions(
         const text = await response.text();
         ensure(text.length <= 12000, "بيانات الإصدار أكبر من الحد المسموح");
         const manifest = JSON.parse(text);
+        ensure((manifest.channel || "stable") === channel, "قناة الإصدار لا تطابق مسار الإعلان");
         if (Number(manifest.versionCode) < 10) continue;
         const alert = appUpdateAlert(manifest),
           now = new Date().toISOString();
