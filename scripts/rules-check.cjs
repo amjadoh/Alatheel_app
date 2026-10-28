@@ -22,6 +22,7 @@ async function main(){
     setDoc(doc(db,'users/staff/staffAlerts/event'),{read:false,title:'test'}),
     setDoc(doc(db,'users/other/staffAlerts/event'),{read:false,title:'other'}),
     setDoc(doc(db,'users/owner/staffAlerts/update'),{read:false,title:'new app',kind:'app_update'}),
+    setDoc(doc(db,'users/owner/staffAlerts/management'),{read:false,title:'management message',kind:'management_message'}),
     setDoc(doc(db,'users/owner/staffAlerts/former-staff-alert'),{read:false,title:'private finance',kind:'collection_due'}),
     setDoc(doc(db,'mealTypes/feed'),{name:'feed',unit:'kg',pricePerUnit:2,currentStock:10,minThreshold:3,autoFeedingFrom:'2026-10-19'}),
     setDoc(doc(db,'horses/horse'),{name:'horse',ownerId:'owner',status:'private',feedingHistory:[],feeding:[],createdAt:stamp,updatedAt:stamp}),
@@ -56,8 +57,10 @@ async function main(){
   await assertFails(getDoc(doc(ownerDB,'users/staff/staffAlerts/event')));
   await assertFails(getDoc(doc(disabledDB,'users/staff/staffAlerts/event')));
   await assertSucceeds(getDoc(doc(ownerDB,'users/owner/staffAlerts/update')));
+  await assertSucceeds(getDoc(doc(ownerDB,'users/owner/staffAlerts/management')));
   await assertFails(getDoc(doc(ownerDB,'users/owner/staffAlerts/former-staff-alert')));
   await assertSucceeds(updateDoc(doc(ownerDB,'users/owner/staffAlerts/update'),{read:true}));
+  await assertSucceeds(updateDoc(doc(ownerDB,'users/owner/staffAlerts/management'),{read:true}));
   await assertFails(setDoc(doc(ownerDB,'users/owner/staffAlerts/forged'),{kind:'app_update'}));
   for(const collection of ['pushDevices','stockAlertState','staffAlertEvents','appUpdateState'])await assertFails(setDoc(doc(staffDB,collection+'/forged'),{userId:'staff'}));
   await assertFails(updateDoc(doc(staffDB,'mealTypes/feed'),{currentStock:99}));

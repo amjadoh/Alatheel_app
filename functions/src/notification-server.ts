@@ -31,6 +31,7 @@ import {
 } from "./alerts";
 import { resolveAccess } from "./access";
 import { sessionExpiresAt } from "./session-policy";
+import { validateManagementMessage } from "./management-message";
 
 const digest = (s: string) =>
   createHash("sha256").update(s).digest("hex").slice(0, 40);
@@ -199,6 +200,58 @@ export function notificationFunctions(
     });
     return { ok: true };
   });
+  const sendManagementMessage = onCall(options, async (request) => {
+    const { identity } = await verify(request),
+      senderId = request.auth!.uid,
+      input = validateManagementMessage(request.data, identity.email),
+      now = new Date().toISOString(),
+      eventId = digest(`management_${senderId}_${input.requestId}`),
+      eventRef = db.doc(`staffAlertEvents/${eventId}`);
+    return db.runTransaction(async (tx) => {
+      const [sender, existing, ...recipients] = await Promise.all([
+        tx.get(db.doc(`users/${senderId}`)),
+        tx.get(eventRef),
+        ...input.recipientIds.map((id) => tx.get(db.doc(`users/${id}`))),
+      ]);
+      resolveAccess(identity, sender.data());
+      if (existing.exists)
+        return {
+          ok: true,
+          recipients: Number(existing.data()?.recipientCount || 0),
+          duplicate: true,
+        };
+      recipients.forEach((recipient) => {
+        const user = { ...recipient.data(), id: recipient.id } as any;
+        ensure(
+          recipient.exists && !user.deleted && eligiblePushUser(user),
+          "أحد المستلمين غير نشط أو غير معتمد",
+        );
+      });
+      tx.create(eventRef, {
+        kind: "management_message",
+        senderId,
+        recipientIds: input.recipientIds,
+        recipientCount: recipients.length,
+        body: input.body,
+        createdAt: now,
+      });
+      recipients.forEach((recipient) =>
+        tx.create(db.doc(`users/${recipient.id}/staffAlerts/${eventId}`), {
+          key: `management_${senderId}_${input.requestId}`,
+          kind: "management_message",
+          title: "رسالة من إدارة الإسطبل",
+          body: input.body,
+          page: "notifications",
+          senderId,
+          userId: recipient.id,
+          read: false,
+          createdAt: now,
+          deliveryState: "pending",
+        }),
+      );
+      return { ok: true, recipients: recipients.length, duplicate: false };
+    });
+  });
   const synchronizeFeeding = onSchedule(
     {
       ...options,
@@ -343,6 +396,8 @@ export function notificationFunctions(
       } else if (a.kind === "app_update") {
         const current = await tx.get(db.doc(`appUpdateState/${a.channel === "beta" ? "beta" : "current"}`));
         relevant = current.data()?.versionCode === a.versionCode;
+      } else if (a.kind === "management_message") {
+        relevant = true;
       } else {
         const current = await tx.get(db.doc(`mealTypes/${a.mealTypeId}`));
         const phase = await tx.get(db.doc(`stockAlertState/${a.mealTypeId}`));
@@ -379,7 +434,9 @@ export function notificationFunctions(
           ...(plan.idleState!=="sent" ? {deliveredAt:null} : {})});
         return;
       }
-      const copy = pushCopy(alert.kind, alert.channel);
+      const copy = alert.kind === "management_message"
+        ? { title: alert.title, body: alert.body }
+        : pushCopy(alert.kind, alert.channel);
       const result = await sendPush({
         tokens:selected.map(d=>d.data().token),data:{...copy,alertId,userId,kind:alert.kind},
         android:{priority:"high",ttl:alert.kind==="collection_due" ? 3*3600000 : 24*3600000,collapseKey:alertId},
@@ -443,6 +500,7 @@ export function notificationFunctions(
   );
   return {
     updatePushDevice,
+    sendManagementMessage,
     synchronizeFeeding,
     remindCollections,
     inventoryAlert,

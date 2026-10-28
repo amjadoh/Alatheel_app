@@ -41,7 +41,7 @@ test("seven day session expires exactly at seven days rather than on a token ref
 });
 const release={packageId:"com.alatheel.stable",versionName:"1.8.1",versionCode:10,url:"https://alatheel-app-426403695200.web.app/downloads/Alatheel-1.8.1.apk",sha256:"a".repeat(64),size:7687602};
 test("release announcements have a stable per-version identity and reject untrusted or incomplete manifests",()=>{
- const a=appUpdateAlert(release);assert.equal(a.key,"release_10");assert.equal(a.page,"update");assert.deepEqual(appUpdateAlert({...release}),a);
+ const a=appUpdateAlert(release);assert.equal(a.key,"release_10");assert.equal(a.page,"update");assert.equal(a.body,"تم معالجة وتحسين بعض الإجراءات");assert.equal(pushCopy("app_update").body,a.body);assert.deepEqual(appUpdateAlert({...release}),a);
  for(const value of [{...release,url:"https://evil.test/app.apk"},{...release,sha256:"bad"},{...release,size:0},{...release,versionCode:9},{...release,packageId:"other"}])assert.throws(()=>appUpdateAlert(value));
 });
 test("beta release announcement is isolated to the primary stable manager",()=>{
@@ -53,10 +53,17 @@ test("beta release announcement is isolated to the primary stable manager",()=>{
  assert.throws(()=>appUpdateAlert({...release,channel:"beta"}));
  assert.match(pushCopy("app_update","beta").title,/بيتا/);
 });
-test("all approved members may receive updates while only staff may receive financial or stock alerts",()=>{
- for(const role of ["admin","employee","owner","viewer"]){const u={id:role,role,disabled:false,membershipApproved:true};assert.ok(eligiblePushUser(u));assert.ok(allowedAlertKinds(u).includes("app_update"));assert.equal(allowedAlertKinds(u).includes("collection_due"),["admin","employee"].includes(role));}
+test("all approved members may receive updates and management messages while only staff may receive financial or stock alerts",()=>{
+ for(const role of ["admin","employee","owner","viewer"]){const u={id:role,role,disabled:false,membershipApproved:true};assert.ok(eligiblePushUser(u));assert.ok(allowedAlertKinds(u).includes("app_update"));assert.ok(allowedAlertKinds(u).includes("management_message"));assert.equal(allowedAlertKinds(u).includes("collection_due"),["admin","employee"].includes(role));}
  assert.deepEqual(allowedAlertKinds({id:"x",role:"owner",disabled:true,membershipApproved:true}),[]);
  assert.deepEqual(allowedAlertKinds({id:"x",role:"admin",disabled:false,membershipApproved:false}),[]);
+});
+test("management messages target every enabled active device even without an optional category",()=>{
+ const alert={key:"management_request",kind:"management_message" as const,title:"رسالة من إدارة الإسطبل",body:"تنبيه",page:"notifications" as const};
+ const device={id:"d",enabled:true,sessionExpiresAt:2000,kinds:[]};
+ assert.equal(eligibleAlertRecipient(alert,{id:"owner",role:"owner",disabled:false,membershipApproved:true}),true);
+ assert.equal(deviceWantsAlert(device,alert,1000),true);
+ assert.equal(deviceWantsAlert({...device,enabled:false},alert,1000),false);
 });
 test("update pushes exclude current/newer installs, expired sessions and disabled preferences",()=>{
  const alert=appUpdateAlert(release),device={id:"d",enabled:true,sessionExpiresAt:2000,kinds:["app_update"],installedVersionCode:9};

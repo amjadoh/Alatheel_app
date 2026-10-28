@@ -130,8 +130,8 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['displayName','photoURL','phoneNumber']);
     }
     match /users/{userId}/staffAlerts/{alertId} {
-      allow read: if isSignedIn() && request.auth.uid == userId && (isEmployee() || resource.data.kind == 'app_update');
-      allow update: if isSignedIn() && request.auth.uid == userId && (isEmployee() || existing().kind == 'app_update') && incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read is bool;
+      allow read: if isSignedIn() && request.auth.uid == userId && (isEmployee() || resource.data.kind in ['app_update', 'management_message']);
+      allow update: if isSignedIn() && request.auth.uid == userId && (isEmployee() || existing().kind in ['app_update', 'management_message']) && incoming().diff(existing()).affectedKeys().hasOnly(['read']) && incoming().read is bool;
       allow create, delete: if false;
     }
     match /pushDevices/{deviceId} { allow read, write: if false; }
