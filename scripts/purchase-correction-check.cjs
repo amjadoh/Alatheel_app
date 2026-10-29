@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict"),
   { launchBrowser, startVite } = require("./ui-harness.cjs");
-const base = "http://127.0.0.1:5399";
+const base = process.env.QA_BASE_URL || "http://127.0.0.1:5399";
 (async () => {
-  const server = await startVite(base, "/tests/ui/app.html", { attempts: 100, force: true });
+  const server = await startVite(base, "/tests/ui/app.html", { attempts: 100 });
   let browser;
   try {
     browser = await launchBrowser();
@@ -84,7 +84,7 @@ const base = "http://127.0.0.1:5399";
     }
   } finally {
     if (browser) await browser.close();
-    server.kill();
+    server?.kill();
   }
 })().catch((e) => {
   console.error(e);
