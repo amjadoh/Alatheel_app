@@ -1,0 +1,18 @@
+{
+  "id": "ed5ed10d-8284-42c0-8a61-ae5a0b01857d",
+  "text": "Generated test from the physical phone. Verify Firebase to GitHub sync. No business data.",
+  "files": [
+    {
+      "index": 0,
+      "name": "321418.png",
+      "extension": "png",
+      "size": 68,
+      "sha256": "4a22307cc53bea7d844d12f3cc8923dbffd4597cc011806cc57c9b59749ab4e1",
+      "mime": "image/png",
+      "chunks": 1
+    }
+  ],
+  "version": "1.12.3",
+  "createdByName": "Amjad Alluhaybi",
+  "createdAt": "2026-10-29T09:26:34.077Z"
+}
