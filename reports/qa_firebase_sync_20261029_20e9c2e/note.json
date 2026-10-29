@@ -1,0 +1,27 @@
+{
+  "id": "qa_firebase_sync_20261029_20e9c2e",
+  "text": "[اختبار مزامنة Firebase] ملاحظة تجريبية للتحقق من وصول الصورة والمرفق مرة واحدة. لا تتضمن بيانات أعضاء أو مالية ولا تحتاج إجراءً.",
+  "files": [
+    {
+      "index": 0,
+      "name": "firebase-sync-qa.png",
+      "extension": "png",
+      "size": 68,
+      "sha256": "4a22307cc53bea7d844d12f3cc8923dbffd4597cc011806cc57c9b59749ab4e1",
+      "mime": "image/png",
+      "chunks": 1
+    },
+    {
+      "index": 1,
+      "name": "firebase-sync-qa.txt",
+      "extension": "txt",
+      "size": 486000,
+      "sha256": "9a92e1062ecb00a96e7b8f3261bd3ee7f615ab2c104ff38ed51acd4537031367",
+      "mime": "text/plain",
+      "chunks": 2
+    }
+  ],
+  "version": "1.12.3",
+  "createdByName": "اختبار مزامنة الأثيل",
+  "createdAt": "2026-10-29T09:14:12.209Z"
+}
