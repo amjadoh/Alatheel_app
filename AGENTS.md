@@ -7,7 +7,8 @@ The user requires that releases are withheld until the changed workflows work an
 - These rules are mandatory for every agent working on this repository. The absence of server-side branch protection is never permission to bypass them; the current GitHub plan cannot enforce branch protection on this private repository.
 - Never edit or push directly on `main`. If the checkout is on `main`, create or switch to a dedicated feature branch before changing files.
 - Push only the feature branch, then open or update its pull request targeting `main`.
-- Do not merge a pull request until the complete `Android APK` workflow has passed for the pull request's latest commit. A passing post-merge run is not a substitute for pre-merge verification.
+- Before merging, verify the pull request's latest commit using either the complete `Android APK` workflow or its complete local equivalent. Local verification must cover every validation stage in `.github/workflows/android.yml`, including unit and financial tests, app/function builds, mobile UI checks, Firestore emulator checks, signed Android build and identity checks, and upgrade/startup checks on Android 29 and 35. Installing dependencies or building alone is not equivalent.
+- Record the verified commit SHA, commands, results and artifact hashes in the pull request. Any source change invalidates affected results; verify the final commit before merging. A failing or unavailable stage blocks merging and deployment. A passing post-merge run is not a substitute for pre-merge verification.
 - Do not merge automatically. Leave the tested pull request open until the repository owner explicitly approves the merge.
 - Keep `main` releasable. Do not bypass, disable, or weaken required checks to merge a change.
 

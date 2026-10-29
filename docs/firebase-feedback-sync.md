@@ -8,7 +8,7 @@ Retries use Eventarc delivery of the original submission event, not new status-c
 
 ## Activation requirements
 
-1. Complete the required PR `Android APK` checks before merging. Actions billing restrictions currently affect this verification too; do not bypass checks.
+1. Complete the PR `Android APK` checks or the complete local equivalent defined in `AGENTS.md` before merging. Record evidence against the latest PR commit. GitHub billing restrictions do not waive any validation stage.
 2. Create a dedicated fine-grained GitHub token limited to `amjadoh/Alatheel_app` with **Contents: read/write** and **Issues: read/write** (Metadata read is implicit). Store it as `FEEDBACK_GITHUB_TOKEN` in Firebase Secret Manager for project `gen-lang-client-0145196991`. Use a secure local prompt or the Google console, never chat, source control, the APK, or logs. Do not reuse the workstation's general Git credential. Track expiry and rotate before expiration.
 3. Build functions and deploy `functions:syncAppFeedback,functions:appFeedback,functions:feedbackBridge` from the approved commit. The trigger must target database `ai-studio-3316cd3a-14d1-4f71-adec-897324c5bb0e`, with `minInstances: 0`, one instance, and concurrency one. Confirm runtime access to this secret and Eventarc delivery permissions.
 4. Keep the old Actions workflow disabled. Its cron is removed; manual dispatch remains for legacy recovery only. It skips all notes with `syncRequestId`, avoiding competition with Firebase.
