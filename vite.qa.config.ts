@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 export default defineConfig({
+  cacheDir: "node_modules/.vite-qa",
+  optimizeDeps: { entries: ["tests/ui/*.html"] },
   plugins: [
     {
       name: "local-fixture-only",
