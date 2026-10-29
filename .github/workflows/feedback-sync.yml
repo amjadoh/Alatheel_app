@@ -1,7 +1,6 @@
 name: Sync app feedback
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # Recovery only. Firebase synchronizes submitted notes without polling Actions.
   workflow_dispatch:
 permissions:
   contents: write

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { FEEDBACK_LIMITS as L, FEEDBACK_REPO, feedbackManifest, verifyBridgeToken, githubSigningKey } from "./feedback-policy";
@@ -65,7 +65,7 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
       await db.runTransaction(async tx => {
         const current = await tx.get(ref);
         if (current.data()?.syncState === "draft") {
-          tx.update(ref, { syncState: "queued", submittedAt: now });
+          tx.update(ref, { syncState: "queued", submittedAt: now, syncRequestId: randomUUID() });
           for(const admin of primaryUsers.docs)if(admin.data().role==="admin"&&!admin.data().disabled&&admin.data().membershipApproved===true)
             tx.create(admin.ref.collection("staffAlerts").doc(digest("feedback_"+id).slice(0,40)),{key:"feedback_"+id,kind:"app_feedback",title:"بلاغ جديد على التطبيق",body:note.createdByName+" · "+(note.title||String(note.text||"").slice(0,100)),page:"feedback",feedbackId:id,userId:admin.id,read:false,createdAt:now,deliveryState:"pending"});
         }
@@ -82,7 +82,11 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
     }
     if (action === "retry") {
       check(note.syncState === "failed", "الملاحظة لا تحتاج إعادة إرسال");
-      await ref.update({ syncState: "queued", attempts: 0, leaseUntil: 0, updatedAt: now });
+      await db.runTransaction(async tx => {
+        const current = await tx.get(ref);
+        check(current.data()?.syncState === "failed", "الملاحظة لا تحتاج إعادة إرسال");
+        tx.update(ref, { syncState: "queued", attempts: 0, leaseUntil: 0, updatedAt: now, syncRequestId: randomUUID() });
+      });
       return { ok: true };
     }
     if (action === "download") {
@@ -110,7 +114,7 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
         for (const candidate of candidates.docs) {
           const claimed = await db.runTransaction(async tx => {
             const latest = await tx.get(candidate.ref), value = latest.data()!;
-            if (!["queued", "uploading"].includes(value.syncState) || value.leaseUntil > now) return null;
+            if (value.syncRequestId || !["queued", "uploading"].includes(value.syncState) || value.leaseUntil > now) return null;
             if (value.attempts >= 8) { tx.update(candidate.ref, { syncState: "failed", leaseUntil: 0 }); return null; }
             tx.update(candidate.ref, { syncState: "uploading", leaseOwner: worker, leaseUntil: now + 20 * 60 * 1000, attempts: Number(value.attempts || 0) + 1 });
             return { id: candidate.id, text: value.text, files: value.files, version: value.version, createdByName: value.createdByName, createdAt: value.createdAt };
@@ -138,5 +142,5 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
       res.status(400).json({ error: "Unknown action" });
     } catch { res.status(409).json({ error: "Feedback request failed" }); }
   });
-  return { appFeedback, feedbackBridge };
+  return { appFeedback, feedbackBridge, fileBytes };
 }

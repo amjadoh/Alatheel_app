@@ -3,7 +3,7 @@ const assert = require("node:assert/strict"),
   path = require("node:path"),
   os = require("node:os");
 const { chromium, startVite } = require("./ui-harness.cjs");
-const base = `http://127.0.0.1:${process.env.QA_AUTH_PORT || 5184}`,
+const base = process.env.QA_BASE_URL || `http://127.0.0.1:${process.env.QA_AUTH_PORT || 5184}`,
   report = { checks: [], errors: [] };
 let server, context, profile;
 const now = Math.floor(Date.now() / 1000),
@@ -152,7 +152,7 @@ function pass(name) {
   console.log("PASS", name);
 }
 (async () => {
-  server = await startVite(base, "/", { force: true, attempts: 160, delay: 250, error: "Auth test server did not start" });
+  server = await startVite(base, "/", { attempts: 160, delay: 250, error: "Auth test server did not start" });
   await fresh();
   let page = await launch();
   await open(page);

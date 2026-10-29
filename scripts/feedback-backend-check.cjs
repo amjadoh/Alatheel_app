@@ -5,11 +5,12 @@ const backend=createRequire(path.resolve(__dirname,'../functions/package.json'))
 const {initializeApp,deleteApp}=backend('firebase-admin/app');
 const {getFirestore}=backend('firebase-admin/firestore');
 const {feedbackFunctions}=require('../functions/lib/feedback-server');
+const {synchronizeFeedback}=require('../functions/lib/feedback-sync');
 const {businessDay}=require('../functions/lib/dates');
 async function main(){
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Emulator required');
  const app=initializeApp({projectId:'demo-alatheel'},'feedback-qa'),db=getFirestore(app);
- const {appFeedback}=feedbackFunctions(db,async request=>{if(!request.auth)throw new Error('Authentication required');return {identity:{email:request.auth.uid==='feedback-admin'?'amjadoh@gmail.com':'manager@example.test'}};});
+ const {appFeedback,fileBytes}=feedbackFunctions(db,async request=>{if(!request.auth)throw new Error('Authentication required');return {identity:{email:request.auth.uid==='feedback-admin'?'amjadoh@gmail.com':'manager@example.test'}};});
  const call=(data,uid='feedback-admin')=>appFeedback.run({data,auth:{uid,token:{}}});
  const base={role:'admin',membershipApproved:true,disabled:false,displayName:'مدير تجريبي'};
  try{
@@ -34,6 +35,10 @@ async function main(){
   await assert.rejects(()=>call({...upload,base64:Buffer.alloc(384*1024,5).toString('base64')}));
   await call({action:'submit',id:create.id});await call({action:'submit',id:create.id});
   assert.equal((await call(create)).syncState,'queued');
+  const initialRequest=(await db.doc('appFeedback/'+create.id).get()).data().syncRequestId;
+  assert.ok(initialRequest);
+  await call({action:'submit',id:create.id});
+  assert.equal((await db.doc('appFeedback/'+create.id).get()).data().syncRequestId,initialRequest);
   await assert.rejects(()=>call(upload));
   const download=await call({action:'download',id:create.id,file:0});assert.equal(download.base64,bytes.toString('base64'));
   await assert.rejects(()=>call({action:'download',id:create.id,file:0},'feedback-employee'));
@@ -43,6 +48,16 @@ async function main(){
   await assert.rejects(()=>call({action:'retry',id:create.id}));
   await db.doc('appFeedback/'+create.id).update({syncState:'failed'});await call({action:'retry',id:create.id});
   assert.equal((await db.doc('appFeedback/'+create.id).get()).data().syncState,'queued');
+  const retryRequest=(await db.doc('appFeedback/'+create.id).get()).data().syncRequestId;
+  assert.notEqual(retryRequest,initialRequest);
+  let exportCount=0;
+  const exportStub=async(note,github,read)=>{exportCount++;assert.deepEqual(await read(note.files[0]),bytes);return {number:123,url:'unused',html_url:'https://github.com/amjadoh/Alatheel_app/issues/123'};};
+  const synchronize=(requestId)=>synchronizeFeedback(db,create.id,requestId,new Date().toISOString(),()=> 'isolated',fileBytes,exportStub);
+  await synchronize(initialRequest);assert.equal(exportCount,0);
+  await synchronize(retryRequest);await synchronize(retryRequest);
+  assert.equal(exportCount,1);
+  const exported=(await db.doc('appFeedback/'+create.id).get()).data();
+  assert.equal(exported.syncState,'synced');assert.equal(exported.emailState,'disabled');
   await assert.rejects(()=>call({action:'status',id:create.id,status:'resolved'},'feedback-manager'));
   await assert.rejects(()=>call({action:'download',id:create.id,file:0},'feedback-manager'));
   await assert.rejects(()=>call({action:'status',id:create.id,status:'resolved'}));
