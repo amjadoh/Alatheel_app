@@ -2,11 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 // @ts-expect-error release tooling is intentionally plain Node ESM
-import {
-  releasePaths,
-  verifyPublished,
-  publishAndAnnounce,
-} from "../scripts/publish-update.mjs";
+import * as publication from "../scripts/publish-update.mjs";
+const { releasePaths, verifyPublished, publishAndAnnounce } = publication;
 const bytes = Buffer.from("isolated signed-candidate substitute");
 const manifest = {
   channel: "stable",
