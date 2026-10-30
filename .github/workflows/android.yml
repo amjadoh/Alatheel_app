@@ -62,6 +62,14 @@ jobs:
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
         run: node scripts/help-check.cjs
+      - name: Verify FIFO feed batches and expense-only purchasing
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/feed-batches-check.cjs
+      - name: Verify feedback issue status controls and retry
+        env:
+          QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui
+        run: node scripts/feedback-status-check.cjs
       - name: Verify saved Google session continuity without production accounts
         env:
           QA_NODE_MODULES: ${{ runner.temp }}/alatheel-ui

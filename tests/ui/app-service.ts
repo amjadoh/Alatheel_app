@@ -8,6 +8,7 @@ import {
 import { accountRevision } from "../../functions/src/accounts";
 import { horseFinance } from "../../functions/src/finance";
 import { businessDay } from "../../functions/src/dates";
+import { consumeScheduledFeeding } from '../../functions/src/feeding-stock';
 export { staff, bill, money, nextMonth } from "../../functions/src/domain";
 export type {
   Actor,
@@ -17,12 +18,19 @@ export type {
   Role,
 } from "../../functions/src/domain";
 let s = emptyState();
-export function getNotificationServices(){return null as any;}
+const feedbackFixtureServices={db:{}};
+export function getNotificationServices(){return new URLSearchParams(location.search).get('scenario')==='feedback-status'?feedbackFixtureServices as any:null as any;}
 const qaFeedback = new Map<string,any>(), qaFeedbackCalls: any[] = [];
+export const feedbackListeners=new Set<()=>void>();
+export const feedbackNotes=()=>[...qaFeedback.values()];
+if(new URLSearchParams(location.search).get('scenario')==='feedback-status') {
+  qaFeedback.set('status_ui_fixture',{id:'status_ui_fixture',text:'بلاغ اختبار حالة GitHub',files:[],createdByName:'مدير تجريبي',createdAt:'2026-10-30T00:00:00Z',version:'1.13.0',syncState:'synced',status:'new',emailState:'disabled'});
+  (window as any).__feedbackStatusComplete=(state:string)=>{qaFeedback.get('status_ui_fixture').statusSyncState=state;feedbackListeners.forEach(fn=>fn());};
+}
 let lostFeedbackAcknowledgement=false;
 (window as any).__feedbackQA=()=>({notes:[...qaFeedback.values()].map(n=>({id:n.id,syncState:n.syncState,files:n.files})),calls:qaFeedbackCalls.map(c=>({action:c.action,id:c.id,file:c.file,chunk:c.chunk}))});
 export async function feedbackCommand(data:Record<string,any>){
-  if(new URLSearchParams(location.search).get("scenario")!=="feedback")throw new Error("المزامنة مع المستودع غير مفعلة في بيانات الفحص المحلية");
+  if(!['feedback','feedback-status'].includes(new URLSearchParams(location.search).get("scenario")||''))throw new Error("المزامنة مع المستودع غير مفعلة في بيانات الفحص المحلية");
   if(a.role!=="admin")throw new Error("للمدير فقط");
   qaFeedbackCalls.push(data);
   if(data.action==="create"){
@@ -30,6 +38,7 @@ export async function feedbackCommand(data:Record<string,any>){
     return {ok:true,syncState:qaFeedback.get(data.id).syncState};
   }
   const note=qaFeedback.get(data.id);if(!note)throw new Error("ملاحظة مفقودة");
+  if(data.action==='status'){Object.assign(note,{status:data.status,resolution:data.resolution||'',statusSyncState:'queued'});feedbackListeners.forEach(fn=>fn());return{ok:true};}
   if(data.action==="upload"){if(note.syncState!=="draft")throw new Error("الملاحظة مرسلة");return{ok:true};}
   if(data.action==="submit"){
     note.syncState="queued";
@@ -197,6 +206,15 @@ if (new URLSearchParams(location.search).get("scenario") === "follow-up") {
 }
 type StartupProgress = { stage: "session" | "access" | "data" | "maintenance" | "ready"; completed: number; total: number };
 let emit: (s: State, a: Actor | null, error?: string, phase?: import("../../src/auth-recovery").AuthPhase, progress?: StartupProgress) => void = () => {};
+if(new URLSearchParams(location.search).get('scenario')==='fifo') {
+  s=emptyState();s.settings=[{id:'main',stableName:'الأثيل · فحص الدفعات'}];
+  s.mealTypes=[{id:'feed',name:'شعير تجريبي',unit:'كجم',feedingUnit:'كجم',feedingUnitsPerPurchaseUnit:1,pricePerUnit:0,currentStock:0,minThreshold:1}];
+  s.horses=[{id:'horse',name:'خيل اختبار الدفعات',status:'private',entryDate:'2026-10-16',feeding:[{mealTypeId:'feed',quantity:5,frequency:'daily'}]}];
+  s=applyCommand(s,a,{action:'stock.purchase',id:'feed',requestId:'fifo_old_purchase',data:{amount:10,total:100,paidAt:'2026-10-01',method:'cash'}},'2026-10-01T12:00:00Z');
+  s=applyCommand(s,a,{action:'stock.move',id:'feed',requestId:'fifo_old_consumption',data:{type:'remove',amount:7,reason:'صرف سابق موثق تجريبي'}},'2026-10-02T12:00:00Z');
+  s.mealTypes[0].autoFeedingFrom='2026-10-16';s.mealTypes[0].autoFeedingThrough='2026-10-15';
+  (window as any).__fifoQAConsume=()=>{s=consumeScheduledFeeding(s,'2026-10-16','2026-10-17T00:00:00Z');emit(s,a);};
+}
 export function retryLoginSession() { emit(s,a,undefined,"ready"); }
 if(new URLSearchParams(location.search).get("scenario")==="owner-alerts"){
   a.uid="owner";a.ownerRecordId="owner";a.role="owner";a.displayName="مالك تجريبي";

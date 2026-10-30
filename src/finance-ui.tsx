@@ -19,6 +19,11 @@ import {
 } from "./format";
 
 export const amount = displayAmount;
+export function FeedCostDetails({item}:{item:any}) {
+  if(item.frequency==='recorded') return <span>{item.name}: {displayQuantity(item.quantity)} {item.unit} = {amount(item.amount)} ر.س
+    {item.batchPortions?.map((p:any,i:number)=><span key={i}> · {displayQuantity(p.quantity)} {item.purchaseUnit||'وحدة شراء'} من دفعتها: {p.unvalued?'غير مسعّر':`${amount(p.valueCents/100)} ر.س`}</span>)}</span>;
+  return <span>{item.name}: {displayQuantity(item.quantity)} {item.unit}{item.frequency==='monthly'?'/مرة':'/يوم'} × {displayPrice(item.rate)} × {displayNumber(item.count)} {item.frequency==='monthly'?'مرات بالشهر':'يومًا'} = {amount(item.amount)} ر.س</span>;
+}
 export function HorsePhoto({
   horse,
   large = false,
@@ -276,6 +281,7 @@ export function FinancialDashboard({
             ? "التكلفة مبدئية لوجود بيانات تغذية ناقصة."
             : "التقدير حسب برنامج التغذية وأيام الإقامة وسياسة الإيواء."}
         </p>{" "}
+        {state.mealTypes.some(m=>m.batchCostFrom && m.batchCostFrom.slice(0,7)<=month) && <p className="notice">تكلفة علف الدفعات تشمل حصص التغذية المسجلة حتى آخر خصم فقط، بسعر الدفعة الأقدم وقت الصرف. الوجبات القادمة لا تدخل حتى تسجل، والمشتريات تظهر منفصلة ضمن المدفوعات وقيمة المخزون المتبقي.</p>}
       </section>
       <div className="dashboard-grid finance-grid">
         <button className="stat dark" onClick={() => onGo("income")}>
@@ -510,11 +516,7 @@ export function FinancialDashboard({
               />
               {h.foodItems.map((item: any, i: number) => (
                 <p className="small" key={i}>
-                  {item.name}: {displayQuantity(item.quantity)} {item.unit}
-                  {item.frequency === "monthly" ? "/مرة" : "/يوم"} ×{" "}
-                  {displayPrice(item.rate)} × {displayNumber(item.count ?? h.days)}{" "}
-                  {item.frequency === "monthly" ? "مرات بالشهر" : "يومًا"} ={" "}
-                  {amount(item.amount)} ر.س
+                  <FeedCostDetails item={{...item,count:item.count??h.days}} />
                 </p>
               ))}
               {h.expenseItems.map((item, i) => (

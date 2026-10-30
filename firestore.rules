@@ -155,9 +155,9 @@ service cloud.firestore {
     // 3. Meal Types & Inventory
     match /mealTypes/{mealTypeId} {
       allow read: if isEmployee() || isOwner() || isViewer();
-      allow create: if isEmployee() && isValidMealType(incoming()) && isValidId(mealTypeId) && !incoming().keys().hasAny(['autoFeedingFrom','autoFeedingThrough','stockReconciledAt']);
-      allow update: if isEmployee() && isValidMealType(incoming()) && isValidId(mealTypeId) && !incoming().diff(existing()).affectedKeys().hasAny(['autoFeedingFrom','autoFeedingThrough','stockReconciledAt']) && (!existing().keys().hasAny(['autoFeedingFrom']) || !incoming().diff(existing()).affectedKeys().hasAny(['currentStock','feedingUnit','feedingUnitsPerPurchaseUnit','unit']));
-      allow delete: if isAdmin() && !existing().keys().hasAny(['autoFeedingFrom']);
+      allow create: if isEmployee() && isValidMealType(incoming()) && isValidId(mealTypeId) && !incoming().keys().hasAny(['autoFeedingFrom','autoFeedingThrough','stockReconciledAt','feedBatches','batchCostFrom','legacyFeedPrice']);
+      allow update: if isEmployee() && isValidMealType(incoming()) && isValidId(mealTypeId) && !incoming().diff(existing()).affectedKeys().hasAny(['autoFeedingFrom','autoFeedingThrough','stockReconciledAt','feedBatches','batchCostFrom','legacyFeedPrice']) && (!existing().keys().hasAny(['autoFeedingFrom','feedBatches']) || !incoming().diff(existing()).affectedKeys().hasAny(['currentStock','feedingUnit','feedingUnitsPerPurchaseUnit','unit','pricePerUnit']));
+      allow delete: if isAdmin() && !existing().keys().hasAny(['autoFeedingFrom','feedBatches']);
     }
 
     // 4. Meal Configs (Subcollection or linked by ID)
@@ -189,7 +189,7 @@ service cloud.firestore {
     // 8. Expenses Collection
     match /expenses/{expenseId} {
       allow read: if isEmployee() || ((isOwner() || isViewer()) && request.auth.uid in resource.data.get('horseIds', []));
-      allow create: if isEmployee() && isValidExpense(incoming()) && !incoming().keys().hasAny(['purchaseAdjustment','stockTransactionId']);
+      allow create: if isEmployee() && isValidExpense(incoming()) && incoming().get('expenseKind','operating') != 'feed_purchase' && !incoming().keys().hasAny(['purchaseAdjustment','stockTransactionId']);
       allow update: if isEmployee() && isValidExpense(incoming()) && !incoming().diff(existing()).affectedKeys().hasAny(['purchaseAdjustment','stockTransactionId']) && !existing().get('lockedForPayments', false) && !existing().get('lockedForReceipts',false);
       allow delete: if isAdmin() && !existing().get('lockedForPayments', false) && !existing().get('lockedForReceipts',false);
     }

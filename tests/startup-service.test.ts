@@ -10,6 +10,7 @@ import * as session from "../functions/src/session-policy";
 import * as dates from "../functions/src/dates";
 import * as recovery from "../src/auth-recovery";
 import * as preparation from "../src/startup-data";
+import * as releaseNotes from '../src/release-notes';
 
 // Execute the actual service orchestration with isolated Firebase boundaries.
 // Domain, normalization, session policy and readiness gate remain the real modules.
@@ -42,6 +43,7 @@ function harness(authTime = Math.floor(Date.now() / 1000) - 3600) {
   const user = { uid: admin.uid, photoURL: "", getIdTokenResult: async () => ({ claims: { auth_time: authTime } }), getIdToken: async () => "isolated-token" };
   const auth = { currentUser: user as any };
   const deps: Record<string, any> = {
+    './release-notes': releaseNotes,
     "firebase/app": { initializeApp: () => ({}) },
     "firebase/auth": {
       onAuthStateChanged: (_: any, next: any) => { authChanged = next; return () => {}; },
@@ -140,6 +142,7 @@ test("actual service catch-up runs once and keeps balances blocked until committ
   const h = harness(), pending = deferred(); h.setOperate(() => pending.promise);
   await h.start(); h.deliverProfile(); h.deliver(domain.emptyState()); h.synchronize(); await flush();
   assert.equal(h.calls.filter(c => c.name === "operate").length, 1);
+  assert.equal(h.calls.find(c=>c.name==='operate')!.data.clientVersionCode,releaseNotes.RELEASE_VERSION_CODE);
   assert.equal(h.latest().progress.stage, "maintenance");
   pending.resolve(); await flush();
   assert.equal(h.latest().actor.dataReady, false);

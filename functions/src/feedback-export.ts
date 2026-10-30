@@ -72,3 +72,19 @@ export async function exportFeedback(note: any, github: GithubRequest, readFile:
   }
   throw new Error("Issue history exceeds safe reconciliation limit");
 }
+
+/** State changes never create another issue or another comment. Verify the
+ * original marker before modifying the issue referenced by a feedback record.
+ */
+export async function updateFeedbackIssueStatus(note: any, github: GithubRequest) {
+  if(!/^[a-zA-Z0-9_-]{6,100}$/.test(note.id) || !['new','discussion','resolved'].includes(note.status))throw new Error('Invalid feedback status');
+  const prefix=`https://github.com/${FEEDBACK_REPO}/issues/`;
+  const number=Number(String(note.issueUrl||'').startsWith(prefix)?String(note.issueUrl).slice(prefix.length):'');
+  if(!Number.isSafeInteger(number)||number<1 || note.issueUrl!==prefix+number || (note.issueNumber && note.issueNumber!==number))throw new Error('Invalid feedback issue');
+  const issue=await github(`/issues/${number}`);
+  if(issue.pull_request || issue.number!==number || !String(issue.body||'').startsWith(`<!-- alatheel-feedback:${note.id} -->\n`))throw new Error('Feedback issue marker mismatch');
+  const resolved=note.status==='resolved';
+  if(resolved ? issue.state==='closed'&&issue.state_reason==='completed' : issue.state==='open')return;
+  const result=await github(`/issues/${number}`,'PATCH',{state:resolved?'closed':'open',state_reason:resolved?'completed':'reopened'});
+  if(result.number!==number || result.state!==(resolved?'closed':'open') || (resolved&&result.state_reason!=='completed'))throw new Error('Issue status update was not acknowledged');
+}

@@ -5,6 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { feedbackFunctions } from "./feedback-server";
 import { feedbackSyncFunction } from "./feedback-sync";
+import { financialActions } from './periods';
 import { defineSecret } from "firebase-functions/params";
 import { createTransport } from "nodemailer";
 import { invitationMessage, invitationFailureCode } from "./invitations";
@@ -74,6 +75,7 @@ const needs: Record<string, Collection[]> = {
   "stock.purchase": ["mealTypes"],
   "stock.purchase.correct": ["mealTypes", "inventoryTransactions", "expenses", "expensePayments"],
   "stock.reconcile": ["mealTypes", "horses", "inventoryTransactions"],
+  "stock.value": ["mealTypes", "horses", "inventoryTransactions"],
   "feeding.skip": ["horses", "mealTypes", "inventoryTransactions"],
   "expense.save": ["expenses", "horses", "mealTypes", "expensePayments"],
   "expense.delete": ["expenses", "expensePayments"],
@@ -103,6 +105,7 @@ for (const action of [
   "stock.purchase",
   "stock.purchase.correct",
   "stock.reconcile",
+  "stock.value",
   "feeding.skip",
   "finance.rollover",
   "finance.snapshot",
@@ -217,6 +220,11 @@ export const operate = onCall(options, async (request) => {
         ensure(receipt.data()?.performedBy === actor.uid, "معرف عملية مستخدم");
         return { ok: true };
       }
+      // Compatibility gate, not an authentication claim. An older calculator
+      // must update before writing against the FIFO data model.
+      if(financialActions.has(c.action) || c.action==='stock.move')
+        ensure(Number.isSafeInteger(c.clientVersionCode) && c.clientVersionCode! >= 22,
+          'حدّث تطبيق الأثيل إلى الإصدار 1.13.0 أو أحدث قبل تنفيذ العمليات المالية والمخزون');
       const state = emptyState();
       state.users = [normalizeRecord("users", p.id, p.data()!)];
       // Read only collections required by the operation, inside the same transaction.

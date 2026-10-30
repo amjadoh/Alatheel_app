@@ -1,5 +1,6 @@
 import { MonthlyDashboard as FinancialDashboard } from './monthly-dashboard';
 import { accountingStart } from '../functions/src/accounting-boundary';
+import { batchStockValue } from '../functions/src/feed-valuation';
 import './clear-light.css';
 import { TERMS } from "./terms";
 import { NotificationsPanel,useStaffNotifications } from "./notifications";
@@ -65,6 +66,7 @@ import { UpdateButton,useAppUpdate } from "./updates";
 import {
   HorseFinancialPanel,
   HorsePhoto,
+  FeedCostDetails,
 } from "./finance-ui";
 import {
   horseFinance,
@@ -474,13 +476,6 @@ export default function App() {
           required: true,
         },
         {
-          name: "pricePerUnit",
-          label: "سعر وحدة الشراء (ر.س)",
-          type: "number",
-          min: 0,
-          required: true,
-        },
-        {
           name: "feedingUnit",
           label: "وحدة كمية التغذية اليومية (مثل كجم أو ربطة)",
           required: true,
@@ -521,7 +516,7 @@ export default function App() {
           data: { ...d, currentStock: m?.currentStock || 0 },
         }),
       note: m
-        ? "سعر الكيلو = سعر الكيس ÷ وزن الكيس. الرصيد وحركاته بوحدة الشراء. لمراجعة الموجود فعليًا استخدم «مطابقة الكمية الفعلية»؛ ولشراء جديد استخدم «مشتريات المخزون» من المصروفات. الخصم التلقائي لا يسجل مصروفًا ماليًا جديدًا."
+        ? "سعر الدفعة يحسب من إجمالي فاتورتها في المصروفات. الرصيد وحركاته بوحدة الشراء، والتغذية تخصم أقدم دفعة بسعرها دون سداد جديد."
         : "تعريف صنف جديد فقط؛ يبدأ برصيد صفر. لإضافة شراء مدفوع احفظ الصنف ثم اختر «مشتريات المخزون» من المصروفات. لا تنشئ نفس العلف مرة ثانية. كيس 40 كجم يحتوي 40 وحدة تغذية بالكجم.",
     });
   const purchase = (m: Row) =>
@@ -562,10 +557,12 @@ export default function App() {
           ],
         },
         { name: "notes", label: "مرجع الفاتورة أو ملاحظة", type: "textarea" },
+        { name: "supplier", label: "المورد" },
+        { name: "invoiceNumber", label: "رقم الفاتورة" },
       ],
       values: {
         amount: 1,
-        total: m.pricePerUnit || "",
+        total: "",
         paidAt: today(),
         costPeriod: purchasePeriod(today()),
         method: "bank",
@@ -591,6 +588,18 @@ export default function App() {
         expectedCorrectionId:latest.id,correctionRequestId:crypto.randomUUID(),reason:""},
       note:"يُحفظ الشراء الأصلي وسبب التصحيح. تُحدّث الكمية والمصروف والسداد دون تكرار. إذا تمت مطابقة فعلية بعد الشراء، تبقى الكمية المطابقة كما هي. تصحيح شهر مقفل يسجل فرق التسوية في الشهر الحالي. لا يغير التصحيح تاريخ الشراء أو طريقة سداده.",
       submit:d=>execute({action:"stock.purchase.correct",id:transaction.id,requestId:d.correctionRequestId,data:d})});
+  };
+  const valueOpening = (m:Row,batchId:string) => {
+    const batch=m.feedBatches?.find((b:any)=>b.id===batchId);
+    if(!batch)return;
+    setForm({title:`اعتماد قيمة رصيد قديم · ${m.name}`,
+      fields:[{name:'quantity',label:`كمية هذه الدفعة القديمة (${m.unit})`,type:'number',min:.00000001,max:batch.remaining,required:true},
+        {name:'receivedAt',label:'تاريخ الدفعة الأصلية',type:'date',required:true},
+        {name:'total',label:'قيمة الكمية المحددة بالريال',type:'number',min:.01,required:true},
+        {name:'reason',label:'مرجع القيمة أو الفاتورة الأصلية',type:'textarea',required:true}],
+      values:{batchId,expectedQuantity:batch.remaining,quantity:batch.remaining,receivedAt:today(),total:'',reason:''},
+      note:'اعتماد دفعة من المخزون الموجود فقط، دون شراء أو سداد جديد. إذا كان الرصيد من فواتير مختلفة اعتمد كل دفعة بكميتها وقيمتها وتاريخها مستقلًا، بدءًا من الأقدم. لا يغير تكلفة حصص سبق صرفها ولا التقارير القديمة.',
+      submit:d=>execute({action:'stock.value',id:m.id,data:d})});
   };
   const move = (m: Row, type: string) =>
     setForm({
@@ -892,11 +901,7 @@ export default function App() {
               </p>
               {c.foodItems.map((f: any, i: number) => (
                 <p className="small" key={`food-${i}`}>
-                  {f.name}: {displayQuantity(f.quantity)} {f.unit}
-                  {f.frequency === "monthly" ? "/مرة" : "/يوم"} ×{" "}
-                  {displayPrice(f.rate)} ر.س × {displayNumber(f.count)}{" "}
-                  {f.frequency === "monthly" ? "مرات بالشهر" : "يومًا"} ={" "}
-                  {money(f.amount)} ر.س
+                  <FeedCostDetails item={f} />
                 </p>
               ))}
               {c.expenseItems.map((e, i) => (
@@ -915,8 +920,7 @@ export default function App() {
               </small>
               {c.missingFeed.map((item) => (
                 <p className="small" key={item}>
-                  تنبيه: توجد مشتريات «{item}» ولا توجد كمية تغذية مسجلة لهذا
-                  الخيل؛ لم تُضف تكلفة استهلاكه لهذا الصنف.
+                  التكلفة غير مكتملة: {item}. راجع بيانات التغذية والدفعات قبل اعتماد النتيجة.
                 </p>
               ))}
             </div>
@@ -1806,7 +1810,7 @@ export default function App() {
                     <InventoryItemNeeds item={stockNeeds.items.find(i => i.id === m.id)!} end={stockNeeds.end} />
                     {stockRunway?.items.find(i => i.id === m.id) && <InventoryRunwayPanel name={m.name} item={stockRunway.items.find(i => i.id === m.id)!} today={inventoryDay} horizonEnd={stockRunway.horizonEnd} />}
                     <p className="muted">
-                      حد التنبيه {displayQuantity(m.minThreshold)} · سعر وحدة الشراء{" "}
+                      حد التنبيه {displayQuantity(m.minThreshold)} · آخر سعر شراء للوحدة{" "}
                       {displayPrice(m.pricePerUnit)} ر.س
                     </p>
                     <p className="muted small">
@@ -1816,6 +1820,10 @@ export default function App() {
                       {displayPrice(feedingUnitPrice(m))} ر.س
                     </p>
                     <p className="muted small">{m.autoFeedingFrom ? <>الخصم التلقائي مفعّل من {displayDate(m.autoFeedingFrom)}</> : "الخصم التلقائي غير مفعّل؛ أكد الموجود فعليًا أولًا"}</p>
+                    {m.feedBatches && <div className="notice"><p>قيمة المخزون المسعّر المتبقي: {money(batchStockValue(m).value)} ر.س · الصرف من أقدم دفعة.</p>
+                      {m.feedBatches.filter((b:any)=>b.remaining>0).map((b:any)=><p key={b.id}>{b.unvalued?'رصيد غير مسعّر':'دفعة شراء'}: {displayQuantity(b.remaining)} {m.unit} · {b.unvalued?'القيمة تحتاج اعتمادًا':`${money(b.remainingCents/100)} ر.س`}
+                        {b.unvalued && isAdmin && <Button kind="outline" onClick={()=>valueOpening(m,b.id)}>اعتماد قيمة الرصيد</Button>}</p>)}
+                    </div>}
                     <div className="actions">
                       <Button kind="outline" onClick={() => reconcileStock(m)}>{m.autoFeedingFrom ? "مطابقة الكمية الفعلية" : "تأكيد الرصيد وتفعيل الخصم"}</Button>
                     </div>
@@ -2900,6 +2908,7 @@ function FormView({
             {state.mealTypes.find((m) => m.id === form.inventoryItem)?.unit}
           </p>
           <p>المدفوع المسجل: {money(v.total)} ر.س</p>
+          {state.inventoryTransactions.some(t=>t.movementKind==='purchase' && t.mealTypeId===form.inventoryItem && t.paidAt===v.paidAt && t.amount===Number(v.amount) && t.total===Number(v.total)) && !v.invoiceNumber && <label className="check-field"><input type="checkbox" checked={v.confirmSimilar===true} onChange={e=>update('confirmSimilar',e.target.checked)}/>يوجد شراء مماثل؛ راجعت السجل وهذا شراء مستقل</label>}
           <p>
             سعر الوحدة لهذه الفاتورة:{" "}
             {money(

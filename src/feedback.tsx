@@ -8,7 +8,7 @@ import { feedbackCommand, getNotificationServices, errorText, type Actor } from 
 import { RELEASE_VERSION } from "./release-notes";
 import "./feedback.css";
 import { displayDate, displayNumber } from "./format";
-type Note = { id: string; title?:string; resolution?:string; text: string; files: any[]; version: string; createdAt: string; createdByName: string; syncState: string; status: string; issueUrl?: string; emailState?: string };
+type Note = { id: string; title?:string; resolution?:string; text: string; files: any[]; version: string; createdAt: string; createdByName: string; syncState: string; status: string; issueUrl?: string; emailState?: string; statusSyncState?:string };
 const statusNames: Record<string,string> = { new: "جديدة", discussion: "قيد المعالجة", resolved: "تم حلها" };
 const syncNames: Record<string,string> = { queued: "محفوظة · بانتظار الرفع التلقائي", uploading: "جارٍ الرفع إلى المستودع", synced: "مرفوعة إلى المستودع", failed: "تعذر الرفع؛ يمكنك إعادة المحاولة" };
 const chunkSize = 384 * 1024;
@@ -123,6 +123,11 @@ export function FeedbackPanel({ actor, onBusy, primary=false }: { actor: Actor; 
         {(note.files||[]).map((file,index)=><button className="feedback-file" key={index} disabled={busy} onClick={()=>void download(note,index)}><Paperclip size={18}/><span><bdi>{file.name}</bdi><small>{displayNumber(Math.ceil(file.size/1024))} كيلوبايت</small></span></button>)}
         {(note.files||[]).map((file,index)=>preview[note.id+"_"+index]&&<img className="feedback-full-image" key={index} src={preview[note.id+"_"+index]} alt={file.name}/>)}
         <p className="small muted" role="status">{syncNames[note.syncState]||"محفوظة"}{note.emailState==="failed"?" · تعذر إرسال نسخة البريد؛ البلاغ محفوظ":""}</p>
+        {note.statusSyncState&&<p className="small muted" role="status">{note.statusSyncState==='synced'?'حالة البلاغ متزامنة مع GitHub':note.statusSyncState==='failed'?'تعذرت مزامنة حالة GitHub؛ الحالة محفوظة في التطبيق':note.syncState!=='synced'?'ستتزامن الحالة بعد رفع البلاغ':'جارٍ تحديث حالة GitHub'}</p>}
+        {primary&&note.syncState==='synced'&&(!note.statusSyncState||note.statusSyncState==='failed')&&<button className="button outline" disabled={busy} onClick={()=>{
+          if(note.status==='resolved'&&!note.resolution){setResolving(note.id);setResolution('');}
+          else void work(async()=>{await feedbackCommand({action:'status',id:note.id,status:note.status,resolution:note.resolution||''});});
+        }}><RefreshCw size={16}/>مزامنة حالة GitHub</button>}
         {note.resolution&&<p className="notice">بلاغ الحل: {note.resolution}</p>}
         {primary&&<label className="field"><span>حالة البلاغ</span><select disabled={busy} value={note.status} onChange={e=>{if(e.target.value==="resolved"){setResolving(note.id);setResolution("");}else void work(async()=>{await feedbackCommand({action:"status",id:note.id,status:e.target.value});});}}>{Object.entries(statusNames).map(([key,value])=><option value={key} key={key}>{value}</option>)}</select></label>}
         {resolving===note.id&&<div><label className="field"><span>بلاغ الحل</span><textarea value={resolution} onChange={e=>setResolution(e.target.value)} maxLength={2000}/></label><button className="button gold" disabled={busy||!resolution.trim()} onClick={()=>void work(async()=>{await feedbackCommand({action:"status",id:note.id,status:"resolved",resolution});setResolving("");})}>حفظ الحل</button></div>}

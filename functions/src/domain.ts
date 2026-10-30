@@ -22,6 +22,8 @@ import {
 import { boardingTerms } from "./boarding";
 import { itemKey, similarItems } from "./inventory";
 import { accountingStart } from './accounting-boundary';
+import { purchaseFeedBatch, initializeFeedBatches, addUnvaluedStock, validateBatchBalance, correctFeedBatch } from './feed-valuation';
+import { takeFeedBatches, type FeedBatch } from './feed-batches';
 export type Role = "admin" | "employee" | "owner" | "viewer";
 export type Row = { id: string; [key: string]: any };
 export const collections = [
@@ -51,6 +53,7 @@ export type Actor = {
   dataReady?: boolean;
 };
 export type Command = {
+  clientVersionCode?: number;
   action: string;
   id?: string;
   data?: Record<string, any>;
@@ -558,17 +561,17 @@ export function applyCommand(
         `يوجد صنف مشابه: ${similar.map((m) => m.name).join("، ")}. راجع الأصناف أو أكد أنه صنف مختلف`,
       );
       const measure = feedingMeasure({ ...old, ...d });
-      if (old?.autoFeedingFrom) {
+      if (old?.autoFeedingFrom || old?.feedBatches) {
         const oldMeasure = feedingMeasure(old);
         ensure(d.unit === old.unit && measure.unit === oldMeasure.unit && measure.unitsPerPurchaseUnit === oldMeasure.unitsPerPurchaseUnit,
-          "لا يمكن تغيير وحدة صنف مفعل للخصم التلقائي؛ أنشئ صنفًا مستقلًا للوحدة الجديدة");
+          "لا يمكن تغيير وحدة صنف مرتبط بدفعات أو خصم تلقائي؛ أنشئ صنفًا مستقلًا للوحدة الجديدة");
       }
       put(s, "mealTypes", {
         ...old,
         id,
         name,
         unit: required(d.unit, "الوحدة"),
-        pricePerUnit: num(d.pricePerUnit, "سعر الوحدة"),
+        pricePerUnit: old?.feedBatches ? old.pricePerUnit : num(d.pricePerUnit ?? old?.pricePerUnit ?? 0, "سعر الوحدة"),
         feedingUnit: d.feedingUnit
           ? required(d.feedingUnit, "وحدة التغذية")
           : measure.unit,
@@ -605,6 +608,14 @@ export function applyCommand(
           !s.expensePayments.some((p) => p.id === paymentId),
         "عملية الشراء مسجلة بالفعل",
       );
+      const supplier=text(d.supplier), invoiceNumber=text(d.invoiceNumber);
+      ensure(!invoiceNumber || supplier, 'حدد المورد مع رقم الفاتورة');
+      ensure(!invoiceNumber || !s.inventoryTransactions.some(t=>t.movementKind==='purchase' &&
+        itemKey(t.supplier||'')===itemKey(supplier) && itemKey(t.invoiceNumber||'')===itemKey(invoiceNumber)), 'هذه الفاتورة مسجلة للمورد بالفعل');
+      ensure(invoiceNumber || d.confirmSimilar===true || !s.inventoryTransactions.some(t=>t.movementKind==='purchase' &&
+        t.mealTypeId===id && t.paidAt===paidAt && t.amount===amount && t.total===total),
+        'يوجد شراء بنفس الصنف والكمية والمبلغ والتاريخ؛ راجع السجل أو أكد أنه شراء مستقل');
+      const shortageValuation=purchaseFeedBatch(m,c.requestId,amount,total,now,s.inventoryTransactions);
       m.currentStock = stockPrecision(Number(m.currentStock || 0) + amount);
       // Latest purchase rate is used only for the open month's estimate; the invoice keeps its exact total.
       m.pricePerUnit = Number((total / amount).toFixed(8));
@@ -657,6 +668,8 @@ export function applyCommand(
         mealName: m.name,
         type: "add",
         movementKind: "purchase",
+        supplier, invoiceNumber,
+        ...(shortageValuation ? {shortageValuation} : {}),
         costPeriod,
         amount,
         total,
@@ -711,6 +724,8 @@ export function applyCommand(
         balance, settlementPeriod:closed ? today.slice(0,7) : originalPeriod,
         stockCountPreserved:reconciled, cashDelta:delta, closedPeriodSettlement:closed,
         previousExpense:structuredClone(expense), previousPayment:structuredClone(payment) };
+      const batchCorrection=correctFeedBatch(s,meal,id,amount,total,stockDelta,c.requestId,today);
+      if(batchCorrection)record.batchCorrection=batchCorrection;
       if (closed && delta !== 0) {
         const expenseId=c.requestId+"_adjustment", paymentId=c.requestId+"_payment";
         ensure(!s.expenses.some(e=>e.id===expenseId)&&!s.expensePayments.some(p=>p.id===paymentId),"التسوية مسجلة بالفعل");
@@ -742,6 +757,10 @@ export function applyCommand(
       ensure(!activating || d.activate === true,
         "أكد تفعيل الخصم التلقائي من الرصيد الفعلي");
       const before = Number(meal.currentStock || 0), delta = stockPrecision(actual - before);
+      if(meal.feedBatches) {
+        if(delta>0)addUnvaluedStock(meal,c.requestId,Math.max(0,actual)-Math.max(0,before),now);
+        else if(delta<0)meal.feedBatches=takeFeedBatches(meal.feedBatches,Math.min(-delta,Math.max(0,before)),now).batches;
+      }
       meal.currentStock = stockPrecision(actual);
       meal.autoFeedingFrom = meal.autoFeedingFrom || addFeedingDays(today, 1);
       // This count is an actual quantity now; the already elapsed part of today must not be deducted again.
@@ -791,6 +810,10 @@ export function applyCommand(
         m.currentStock + (d.type === "add" ? amount : -amount),
       );
       ensure(balance >= 0, "الكمية تتجاوز الرصيد المتاح");
+      if(m.feedBatches) {
+        if(d.type==='add')addUnvaluedStock(m,c.requestId,Math.max(0,balance)-Math.max(0,m.currentStock),now);
+        else m.feedBatches=takeFeedBatches(m.feedBatches,amount,now).batches;
+      }
       m.currentStock = balance;
       s.inventoryTransactions.push({
         id: c.requestId,
@@ -803,6 +826,27 @@ export function applyCommand(
         performedBy: a.uid,
         createdAt: now,
       });
+      break;
+    }
+    case 'stock.value': {
+      ensure(a.role==='admin','اعتماد قيمة الرصيد القديم للمدير فقط');
+      const meal=find(s,'mealTypes',id);
+      initializeFeedBatches(meal,now,s.inventoryTransactions);
+      const batch=(meal.feedBatches as FeedBatch[]).find(b=>b.id===d.batchId && b.unvalued);
+      ensure(batch && batch.remaining>0,'اختر رصيدًا غير مسعر');
+      ensure(batch.remaining===num(d.expectedQuantity,'الكمية المعروضة'),'تغيرت الكمية؛ افتح الاعتماد من جديد');
+      const quantity=num(d.quantity ?? batch.remaining,'كمية الدفعة القديمة',.00000001);
+      ensure(quantity===stockPrecision(quantity),'دقة الكمية تتجاوز ثماني منازل عشرية');
+      ensure(quantity<=batch.remaining,'الكمية تتجاوز الرصيد غير المسعر');
+      const receivedAt=date(d.receivedAt || today);
+      ensure(receivedAt<=today,'تاريخ الرصيد القديم لا يكون مستقبليًا');
+      const total=money(num(d.total,'قيمة المتبقي',.01));
+      const reason=required(d.reason,'مرجع قيمة الرصيد');
+      // Split only the remaining stock. Previously consumed, unvalued portions stay flagged.
+      batch.quantity=stockPrecision(batch.quantity-quantity);batch.remaining=stockPrecision(batch.remaining-quantity);
+      meal.feedBatches=(meal.feedBatches as FeedBatch[]).filter(b=>b.quantity>0);
+      meal.feedBatches.push({id:c.requestId,receivedAt:receivedAt+'T00:00:00+03:00',quantity,remaining:quantity,valueCents:Math.round(total*100),remainingCents:Math.round(total*100)});
+      s.inventoryTransactions.push({id:c.requestId,mealTypeId:id,mealName:meal.name,movementKind:'opening_valuation',type:'add',amount:0,balance:meal.currentStock,batchId:c.requestId,quantity,total,reason,performedBy:a.uid,createdAt:now});
       break;
     }
     case "expense.save": {
@@ -858,6 +902,9 @@ export function applyCommand(
         "حدد تصنيف المصروف",
       );
       const matchedFeed = expenseFeedMeal(d, s.mealTypes);
+      ensure(old || (d.expenseKind!=='feed_purchase' && !s.mealTypes.some(m=>
+        [itemKey(m.name),itemKey('شراء '+m.name)].includes(itemKey(d.name)))),
+        'شراء العلف يسجل من مشتريات المخزون في المصروفات، لمنع تكرار الفاتورة');
       const expenseKind =
         d.expenseKind || (matchedFeed ? "feed_purchase" : "operating");
       ensure(
@@ -1294,6 +1341,7 @@ export function applyCommand(
     default:
       throw new Error("عملية غير معروفة");
   }
+  for(const meal of s.mealTypes)validateBatchBalance(meal);
   if (financialActions.has(c.action)||["finance.setup","expense.start","expense.salary.settle-history"].includes(c.action)) refreshPeriod(s, today);
   s.activities.push({
     id: c.requestId,

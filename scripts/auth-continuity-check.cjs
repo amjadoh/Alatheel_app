@@ -130,6 +130,9 @@ async function open(page, legacy = false) {
     base + "/tests/auth-continuity.html" + (legacy ? "?legacy=1" : ""),
     { waitUntil: "domcontentloaded", timeout: 60000 },
   );
+  // The cold Vite dependency scan may reload the fixture once. Wait until its
+  // imports settle before touching the Firebase instance in that document.
+  await page.waitForLoadState('networkidle');
   await page.waitForFunction(
     () => window.__authQA?.state !== "starting" && !!window.__authQA,
     undefined,
