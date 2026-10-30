@@ -5,7 +5,8 @@ const backend=createRequire(path.resolve(__dirname,'../functions/package.json'))
 const {initializeApp,deleteApp}=backend('firebase-admin/app');
 const {getFirestore}=backend('firebase-admin/firestore');
 const {feedbackFunctions}=require('../functions/lib/feedback-server');
-const {synchronizeFeedback}=require('../functions/lib/feedback-sync');
+const {synchronizeFeedback,synchronizeFeedbackStatus}=require('../functions/lib/feedback-sync');
+const {updateFeedbackIssueStatus}=require('../functions/lib/feedback-export');
 const {businessDay}=require('../functions/lib/dates');
 async function main(){
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Emulator required');
@@ -63,6 +64,20 @@ async function main(){
   await assert.rejects(()=>call({action:'status',id:create.id,status:'resolved'}));
   await call({action:'status',id:create.id,status:'resolved',resolution:'تم إصلاح سبب البلاغ'});
   const solved=(await db.doc('appFeedback/'+create.id).get()).data();assert.equal(solved.status,'resolved');assert.equal(solved.statusHistory.length,2);
+  assert.equal(solved.statusSyncState,'queued');
+  const issue={number:123,state:'open',state_reason:null,body:`<!-- alatheel-feedback:${create.id} -->\n\nIsolated fixture`};let patches=0;
+  const statusUpdate=(note)=>updateFeedbackIssueStatus(note,async(path,method='GET',data)=>{assert.equal(path,'/issues/123');if(method==='PATCH'){patches++;Object.assign(issue,data);}return {...issue};});
+  const synchronizeStatus=requestId=>synchronizeFeedbackStatus(db,create.id,requestId,new Date().toISOString(),()=> 'isolated',statusUpdate);
+  await synchronizeStatus(solved.statusRequestId);await synchronizeStatus(solved.statusRequestId);
+  assert.equal(issue.state,'closed');assert.equal(issue.state_reason,'completed');assert.equal(patches,1);
+  await call({action:'status',id:create.id,status:'discussion'});
+  const reopened=(await db.doc('appFeedback/'+create.id).get()).data();assert.notEqual(reopened.statusRequestId,solved.statusRequestId);
+  await call({action:'status',id:create.id,status:'discussion'});
+  assert.equal((await db.doc('appFeedback/'+create.id).get()).data().statusRequestId,reopened.statusRequestId);
+  await synchronizeStatus(solved.statusRequestId);assert.equal(patches,1);
+  await synchronizeStatus(reopened.statusRequestId);assert.equal(issue.state,'open');assert.equal(patches,2);
+  assert.equal((await db.doc('appFeedback/'+create.id).get()).data().statusSyncState,'synced');
+  assert.equal((await db.doc('appFeedback/'+create.id).get()).data().emailState,'disabled');
   assert.equal((await db.collection('users/feedback-admin/staffAlerts').get()).size,1);assert.equal((await db.collection('users/feedback-manager/staffAlerts').get()).size,0);
   console.log('PASS feedback callable authorization, exact file integrity, missing chunks, immutable uploads, retries, limits and idempotent submission');
  }finally{await deleteApp(app);}

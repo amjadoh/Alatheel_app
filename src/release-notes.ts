@@ -1,4 +1,5 @@
-export const RELEASE_VERSION = "1.12.3";
+export const RELEASE_VERSION = "1.13.0";
+export const RELEASE_VERSION_CODE = 22;
 export const RELEASE_NOTES = [
   {
     title: "تحسينات عامة",

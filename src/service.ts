@@ -1,4 +1,5 @@
 import { initializeApp } from "firebase/app";
+import { RELEASE_VERSION_CODE } from './release-notes';
 import {
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -217,7 +218,7 @@ export function connect(callback: typeof emit) {
           needsMaintenance: () => staff(a) && requiresStartupMaintenance(state, businessDay(new Date().toISOString())),
           maintain: () => {
             maintenanceRequestId ||= crypto.randomUUID();
-            return httpsCallable(functions!, "operate")({ action: "finance.rollover", requestId: maintenanceRequestId });
+            return httpsCallable(functions!, "operate")({ action: "finance.rollover", requestId: maintenanceRequestId, clientVersionCode: RELEASE_VERSION_CODE });
           },
           progress: progress => {
             if (stale() || actor !== a) return;
@@ -349,6 +350,7 @@ export async function execute(
   const retryKey = JSON.stringify([actor.uid, c.action, c.id, c.data]);
   const command = {
     ...c,
+      clientVersionCode: RELEASE_VERSION_CODE,
     requestId:
       c.requestId || pendingCommands.get(retryKey) || crypto.randomUUID(),
   };

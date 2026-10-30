@@ -6,6 +6,7 @@ export const financialActions = new Set([
   "stock.purchase",
   "stock.purchase.correct",
   "stock.reconcile",
+  "stock.value",
   "feeding.skip",
   "finance.rollover",
   "finance.snapshot",
@@ -56,12 +57,14 @@ export function closePeriods(s: State, today: string) {
     .filter((p) => !p.closed && p.id < month)
     .sort((a, b) => a.id.localeCompare(b.id));
   for (const p of open) {
-    const previous = { ...s, ...p.basis, financialPeriods: [] } as State;
+    const previous = { ...s, ...p.basis, financialPeriods: [], inventoryTransactions:s.inventoryTransactions } as State;
+    previous.mealTypes=previous.mealTypes.map(m=>m.batchCostFrom ? {...m,
+      autoFeedingThrough:s.mealTypes.find(x=>x.id===m.id)?.autoFeedingThrough || m.autoFeedingThrough} : m);
     let cursor = p.id,
       count = 0;
     while (cursor < month && count++ < 120) {
       if (!s.financialPeriods.some((x) => x.id === cursor && x.closed)) {
-        const summary = financialSummary(previous, cursor);
+        const summary = structuredClone(financialSummary(previous, cursor));
         const closed = {
           id: cursor,
           closed: true,

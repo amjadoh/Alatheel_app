@@ -3,12 +3,14 @@ import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
 export default defineConfig({
   cacheDir: "node_modules/.vite-qa",
-  optimizeDeps: { entries: ["tests/ui/*.html"] },
+  optimizeDeps: { entries: ["tests/ui/*.html", "tests/auth-continuity.html"] },
   plugins: [
     {
       name: "local-fixture-only",
       enforce: "pre",
       resolveId(source, importer) {
+        if(source==='firebase/firestore' && importer?.replace(/\\/g,'/').endsWith('/src/feedback.tsx'))
+          return resolve('tests/ui/feedback-firestore.ts');
         if (
           source === "./service" &&
           importer?.replace(/\\/g, "/").includes("/src/")

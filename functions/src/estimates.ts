@@ -84,14 +84,33 @@ function feedingItems(s: State, h: Row, month: string) {
       if (feedingSkipped(h, f.mealTypeId, day)) continue;
       const monthly = f.frequency === "monthly", legacy = monthly && !f.schedule?.length;
       if (!legacy && !feedingOnDate(f, day)) continue;
-      const meal = s.mealTypes.find(m => m.id === f.mealTypeId), rate = meal ? feedingUnitPrice(meal) : 0;
+      const meal = s.mealTypes.find(m => m.id === f.mealTypeId);
+      if(meal?.batchCostFrom && day>=meal.batchCostFrom) continue;
+      const rate = meal ? feedingUnitPrice(meal.batchCostFrom ? {...meal,pricePerUnit:meal.legacyFeedPrice} : meal) : 0;
       const key = JSON.stringify([f.mealTypeId, f.quantity, f.frequency || "daily", rate, legacy]);
       const item = groups.get(key) || { name: meal?.name || "صنف غير متاح", unit: meal ? feedingMeasure(meal).unit : "وحدة", quantity: Number(f.quantity), frequency: f.frequency || "daily", count: 0, rate, estimatedSchedule: legacy };
       item.count += legacy ? Number(f.timesPerMonth) / days : 1;
       groups.set(key, item);
     }
   }
-  return [...groups.values()].map(f => ({ ...f, count: Math.round(f.count * 1e8) / 1e8, amount: money(f.quantity * f.rate * f.count) }));
+  const result=[...groups.values()].map(f => ({ ...f, count: Math.round(f.count * 1e8) / 1e8, amount: money(f.quantity * f.rate * f.count) }));
+  for(const movement of s.inventoryTransactions.filter(t=>t.movementKind==='feeding' && String(t.feedingDate).startsWith(month))) {
+    if(feedingSkipped(h,movement.mealTypeId,movement.feedingDate) || !horsePresentOn(h,movement.feedingDate))continue;
+    if(s.inventoryTransactions.some(t=>t.reversalSources?.includes(`${movement.id}:${h.id}`)))continue;
+    const meal=s.mealTypes.find(m=>m.id===movement.mealTypeId);
+    for(const part of (movement.breakdown||[]).filter((b:Row)=>b.horseId===h.id && b.batchPortions)) {
+      const quantity=Number(part.quantity);
+      result.push({name:meal?.name||movement.mealName,unit:part.feedingUnit,quantity,frequency:'recorded',count:1,
+        rate:quantity?Number(part.batchCostCents||0)/100/quantity:0,amount:Number(part.batchCostCents||0)/100,
+        batchPortions:structuredClone(part.batchPortions),purchaseUnit:meal?.unit||movement.unit,uncostedQuantity:Number(part.uncostedQuantity||0),feedingDate:movement.feedingDate});
+    }
+  }
+  for(const correction of s.inventoryTransactions.filter(t=>t.batchCorrection?.settlementDate?.startsWith(month))) {
+    for(const change of correction.batchCorrection.changes.filter((x:Row)=>x.horseId===h.id && x.closedPeriod)) {
+      result.push({name:'تسوية تكلفة تغذية سابقة',unit:'تسوية',quantity:1,frequency:'recorded',count:1,rate:(change.valueCents-change.previousCents)/100,amount:(change.valueCents-change.previousCents)/100});
+    }
+  }
+  return result;
 }
 
 export function horseCost(s: State, h: Row, month: string) {
@@ -128,6 +147,13 @@ export function horseCost(s: State, h: Row, month: string) {
     }))
     .filter((e) => e.amount !== 0);
   const missingFeed = [
+    ...foodItems.filter(f=>f.uncostedQuantity>0).map(f=>`تكلفة دفعة غير مكتملة: ${f.name}`),
+    ...foodItems.filter(f=>f.frequency!=='recorded' && f.quantity>0 && !(f.rate>0)).map(f=>`سعر تغذية سابق غير مسجل: ${f.name}`),
+    ...s.mealTypes.filter(m=>m.batchCostFrom && m.batchCostFrom.slice(0,7)<=month &&
+      h.feeding?.some((f:Row)=>f.mealTypeId===m.id) && !m.autoFeedingFrom).map(m=>`خصم التغذية غير مفعل: ${m.name}`),
+    ...s.mealTypes.filter(m=>m.batchCostFrom && m.batchCostFrom.slice(0,7)<=month && m.autoFeedingFrom &&
+      h.feeding?.some((f:Row)=>f.mealTypeId===m.id) && (!m.autoFeedingThrough || m.autoFeedingThrough<`${month}-${String(monthDays(month)).padStart(2,'0')}`))
+      .map(m=>`التغذية المسجلة لا تغطي كامل الفترة: ${m.name}`),
     ...new Set(
       s.expenses
         .filter(

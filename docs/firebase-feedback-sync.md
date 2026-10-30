@@ -16,3 +16,21 @@ Retries use Eventarc delivery of the original submission event, not new status-c
 6. Verify a user-submitted note and attachment end to end after activation: one issue, intact bytes, visible synced state, no SMTP mail. Until this check succeeds, report deployment/authentication verification as pending. Use only isolated fixtures for automated tests.
 
 Firestore access, Eventarc delivery, function execution, Secret Manager, deployment storage and network transfer may be billable. Five attempts limit export work per request; they are not a monetary spending cap.
+
+## Issue status synchronization
+
+Primary-manager status changes queue a separate `statusRequestId`. The same
+Firestore worker closes `resolved` issues with `state_reason: completed`, and
+reopens `new`/`discussion` issues. It first validates the repository URL, issue
+number, non-PR type and feedback marker. It does not create issues, comments or
+attachment commits for status changes, and skips PATCH when the desired state is
+already present. Independent leases, request generations, five-attempt/24-hour
+bounds and safe failures protect retries and superseded requests. SMTP remains
+disabled; GitHub's own normal notifications still follow account settings.
+
+Statuses queued before initial export wait for that issue to exist. Export
+completion wakes pending status work. Old already-exported notes do not emit an
+event on deployment: the primary manager can use “مزامنة حالة GitHub” to reconcile
+their saved status, or change status normally. Failed status sync exposes the same
+retry button without re-uploading attachments. This is app-to-GitHub synchronization;
+manual GitHub state edits are not imported back into the app.

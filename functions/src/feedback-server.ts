@@ -77,7 +77,16 @@ export function feedbackFunctions(db: Firestore, verifiedGoogle: (request: any) 
       check(primary,"تحديث حالة البلاغ للمدير الأساسي فقط");
       const resolution=String(data.resolution||"").trim().slice(0,2000);
       check(data.status!=="resolved"||resolution,"اكتب ملاحظة الحل");
-      await db.runTransaction(async tx=>{const current=await tx.get(ref);const old=current.data()!;tx.update(ref,{status:data.status,resolution,updatedAt:now,updatedBy:request.auth!.uid,statusHistory:[...(old.statusHistory||[]),{from:old.status,to:data.status,resolution,at:now,by:request.auth!.uid}]});});
+      await db.runTransaction(async tx=>{
+        const current=await tx.get(ref);const old=current.data()!;
+        const changed=old.status!==data.status || (old.resolution||'')!==resolution;
+        if(!changed && ['queued','uploading','synced'].includes(old.statusSyncState))return;
+        const history=old.statusHistory||[];
+        check(!changed || history.length<500,'سجل الحالة ممتلئ؛ يحتاج أرشفة قبل تغييره');
+        tx.update(ref,{status:data.status,resolution,updatedAt:now,updatedBy:request.auth!.uid,
+          statusRequestId:randomUUID(),statusUpdatedAt:now,statusSyncState:'queued',statusAttempts:0,statusLastFailure:'',
+          statusHistory:changed?[...history,{from:old.status,to:data.status,resolution,at:now,by:request.auth!.uid}]:history});
+      });
       return { ok: true };
     }
     if (action === "retry") {

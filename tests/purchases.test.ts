@@ -62,7 +62,10 @@ test("buying the same feed atomically increases one item and registers exactly o
   assert.equal(expensePaid(s, s.expenses[0].id, "2026-10"), 1800);
   assert.equal(financialSummary(s, "2026-10").inventoryPaid, 1800);
   assert.equal(financialSummary(s, "2026-10").paid, 1800);
-  assert.equal(financialSummary(s, "2026-10").total, 209.25); // Food consumption only, no purchase added twice.
+  // Preserve the 15 previous days at their old rate. The new invoice must not
+  // reprice them or invent future recorded consumption while automation is off.
+  assert.equal(financialSummary(s, "2026-10").total, 90);
+  assert.equal(horseFinance(s,s.horses[0],"2026-10").complete,false);
   assert.equal(s.inventoryTransactions[0].expenseId, s.expenses[0].id);
   assert.equal(s.inventoryTransactions[0].paymentId, s.expensePayments[0].id);
   assert.throws(

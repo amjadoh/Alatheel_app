@@ -65,6 +65,8 @@ async function main(){
   for(const collection of ['pushDevices','stockAlertState','staffAlertEvents','appUpdateState'])await assertFails(setDoc(doc(staffDB,collection+'/forged'),{userId:'staff'}));
   await assertFails(updateDoc(doc(staffDB,'mealTypes/feed'),{currentStock:99}));
   await assertFails(updateDoc(doc(staffDB,'mealTypes/feed'),{autoFeedingFrom:'2026-01-01'}));
+  for(const field of ['feedBatches','batchCostFrom','legacyFeedPrice'])await assertFails(updateDoc(doc(staffDB,'mealTypes/feed'),{[field]:field==='feedBatches'?[]:1}));
+  await assertFails(updateDoc(doc(staffDB,'mealTypes/feed'),{pricePerUnit:99}));
   await assertSucceeds(updateDoc(doc(staffDB,'mealTypes/feed'),{minThreshold:4}));
   await assertFails(setDoc(doc(staffDB,'inventoryTransactions/feeding_feed_2026-10-19'),{movementKind:'manual'}));
   await assertFails(setDoc(doc(staffDB,'inventoryTransactions/forged'),{movementKind:'feeding',feedingDate:'2026-10-19'}));
